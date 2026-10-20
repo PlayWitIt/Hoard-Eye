@@ -4,8 +4,10 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
+import net.fabricmc.fabric.api.client.rendering.v1.TooltipComponentCallback;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
+import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.loader.api.FabricLoader;
@@ -30,6 +32,7 @@ import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.inventory.CraftingResultInventory;
 import net.minecraft.item.ItemPlacementContext;
 import net.minecraft.item.ItemStack;
+import net.minecraft.registry.Registries;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.text.Text;
@@ -68,10 +71,13 @@ public class ContainerPeekClient implements ClientModInitializer {
 	/** Where a container's data is stored: a dimension key plus a position within it. */
 	private record Target(ContainerKind kind, String dimension, BlockPos pos) {}
 
+	public static ContainerPeekClient INSTANCE;
+
 	private final NameStore store = new NameStore();
 
 	private KeyBinding toggleKey;
 	private KeyBinding configKey;
+	private KeyBinding searchKey;
 
 	private Target pendingOpen;
 	private int pendingOpenTicks;
@@ -84,6 +90,7 @@ public class ContainerPeekClient implements ClientModInitializer {
 
 	@Override
 	public void onInitializeClient() {
+		INSTANCE = this;
 		migrateOldFiles();
 		ModConfig.load();
 		store.load();
@@ -93,6 +100,8 @@ public class ContainerPeekClient implements ClientModInitializer {
 				"key.containerpeek.toggle", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, category));
 		configKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
 				"key.containerpeek.config", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, category));
+		searchKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+				"key.containerpeek.search", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_Y, category));
 
 		UseBlockCallback.EVENT.register((player, world, hand, hit) -> {
 			if (!world.isClient() || !ModConfig.INSTANCE.enabled) return ActionResult.PASS;
@@ -129,28 +138,39 @@ public class ContainerPeekClient implements ClientModInitializer {
 			Target target = pendingOpen;
 			String name = titleToName(screen.getTitle());
 			pendingOpen = null;
-			store.put(world, target.dimension(), target.pos(), name, null, client.world.getRegistryManager());
+			String block = blockId(client.world, target);
+			store.put(world, target.dimension(), target.pos(), name, null, client.world.getRegistryManager(), block, target.kind());
 			store.saveIfDirty();
 
 			// Slots fill in after the screen opens, so read the contents when it closes.
 			ScreenEvents.remove(screen).register(closed -> {
 				if (client.world == null || !world.equals(worldKey(client))) return;
 				List<ItemStack> items = containerStacks(handled.getScreenHandler());
-				store.put(world, target.dimension(), target.pos(), name, items, client.world.getRegistryManager());
+				store.put(world, target.dimension(), target.pos(), name, items, client.world.getRegistryManager(), block, target.kind());
 				store.saveIfDirty();
 			});
 		});
 
 		ClientTickEvents.END_CLIENT_TICK.register(this::tick);
 
-		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
+		// Disconnect fires on the network thread; do the work on the game thread.
+		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> client.execute(() -> {
 			pendingOpen = null;
 			pendingPlace = null;
 			store.saveIfDirty();
-		});
+		}));
+
+		TooltipComponentCallback.EVENT.register(data ->
+				data instanceof ShulkerPreview.Data preview ? new ShulkerPreview.Component(preview) : null);
 
 		HudElementRegistry.attachElementAfter(VanillaHudElements.CROSSHAIR,
 				Identifier.of(MOD_ID, "name_label"), this::renderHud);
+		HudElementRegistry.addLast(Identifier.of(MOD_ID, "locator"), Locator::renderHud);
+		WorldRenderEvents.BEFORE_DEBUG_RENDER.register(Locator::renderWorld);
+	}
+
+	public NameStore store() {
+		return store;
 	}
 
 	/** Versions before 1.3.0 were called "Shulker Names"; carry their saved files over. */
@@ -177,6 +197,9 @@ public class ContainerPeekClient implements ClientModInitializer {
 		while (configKey.wasPressed()) {
 			client.setScreen(new ConfigScreen(client.currentScreen));
 		}
+		while (searchKey.wasPressed()) {
+			if (client.world != null && worldKey(client) != null) client.setScreen(new SearchScreen());
+		}
 		while (toggleKey.wasPressed()) {
 			ModConfig.INSTANCE.enabled = !ModConfig.INSTANCE.enabled;
 			ModConfig.save();
@@ -186,6 +209,7 @@ public class ContainerPeekClient implements ClientModInitializer {
 			}
 		}
 
+		Locator.tick(client);
 		if (client.world == null || !ModConfig.INSTANCE.enabled) return;
 		String world = worldKey(client);
 		if (world == null) return;
@@ -202,7 +226,7 @@ public class ContainerPeekClient implements ClientModInitializer {
 						&& ChestBlock.getDoubleBlockType(state) != DoubleBlockProperties.Type.SINGLE;
 				if (target.kind() != ContainerKind.ENDER_CHEST && !joinedDouble) {
 					store.put(world, target.dimension(), target.pos(), pendingPlaceName, pendingPlaceItems,
-							client.world.getRegistryManager());
+							client.world.getRegistryManager(), blockId(client.world, target), target.kind());
 					store.saveIfDirty();
 				}
 				pendingPlace = null;
@@ -242,7 +266,7 @@ public class ContainerPeekClient implements ClientModInitializer {
 		TextRenderer font = client.textRenderer;
 		Text line = null;
 		int lineColor = 0xFFFFFFFF;
-		ItemRow row = null;
+		ItemGrid grid = null;
 
 		NameStore.Entry entry = store.get(world, target.dimension(), target.pos());
 		if (entry == null) {
@@ -254,7 +278,7 @@ public class ContainerPeekClient implements ClientModInitializer {
 			if (config.showNames && !entry.name.isEmpty()) line = Text.literal(entry.name);
 			List<ItemStack> stacks = config.showContents ? entry.stacks(client.world.getRegistryManager()) : null;
 			if (stacks != null && !stacks.isEmpty()) {
-				row = ItemRow.of(stacks, config.maxIcons, font);
+				grid = ItemGrid.of(stacks, config.maxIcons, Math.max(1, config.iconsPerRow), font);
 			} else if (stacks != null && line == null) {
 				line = Text.translatable("containerpeek.empty");
 				lineColor = 0xFFAAAAAA;
@@ -263,13 +287,13 @@ public class ContainerPeekClient implements ClientModInitializer {
 						.append(Text.translatable("containerpeek.empty").formatted(Formatting.GRAY));
 			}
 		}
-		if (line == null && row == null) return;
+		if (line == null && grid == null) return;
 
 		// Measure the label, then place it according to the chosen position.
 		int lineWidth = line != null ? font.getWidth(line) : 0;
-		int rowWidth = row != null ? row.width() : 0;
-		int width = Math.max(lineWidth, rowWidth);
-		int height = (line != null ? 9 : 0) + (line != null && row != null ? 2 : 0) + (row != null ? 16 : 0);
+		int gridWidth = grid != null ? grid.width() : 0;
+		int width = Math.max(lineWidth, gridWidth);
+		int height = (line != null ? 9 : 0) + (line != null && grid != null ? 2 : 0) + (grid != null ? grid.height() : 0);
 
 		HudPosition position = config.hudPosition != null ? config.hudPosition : HudPosition.BELOW_CROSSHAIR;
 		float scale = config.scalePercent / 100f;
@@ -301,15 +325,20 @@ public class ContainerPeekClient implements ClientModInitializer {
 			context.drawTextWithShadow(font, line, position.align(width, lineWidth), lineY, lineColor);
 			lineY += 11;
 		}
-		if (row != null) {
-			row.draw(context, font, position.align(width, rowWidth), lineY);
+		if (grid != null) {
+			grid.draw(context, font, position, width, lineY);
 		}
 		matrices.popMatrix();
 	}
 
-	/** The contents as icons, combining identical items so 27 stacks of cobblestone show "1728". */
-	private record ItemRow(List<ItemStack> groups, List<Integer> totals, String more, int width) {
-		static ItemRow of(List<ItemStack> stacks, int maxIcons, TextRenderer font) {
+	/**
+	 * The contents as rows of icons, combining identical items so 27 stacks of cobblestone show "1728".
+	 * Wraps after {@code perRow} icons; a "+N" for anything past {@code maxIcons} goes at the end of the last row.
+	 */
+	private record ItemGrid(List<ItemStack> groups, List<Integer> totals, int perRow, String more, int moreWidth) {
+		private static final int CELL = 18;
+
+		static ItemGrid of(List<ItemStack> stacks, int maxIcons, int perRow, TextRenderer font) {
 			List<ItemStack> groups = new ArrayList<>();
 			List<Integer> totals = new ArrayList<>();
 			outer:
@@ -327,20 +356,44 @@ public class ContainerPeekClient implements ClientModInitializer {
 			int shown = Math.min(groups.size(), maxIcons);
 			int extra = groups.size() - shown;
 			String more = extra > 0 ? "+" + extra : null;
-			int width = shown * 18 + (more != null ? font.getWidth(more) + 2 : 0);
-			return new ItemRow(groups.subList(0, shown), totals.subList(0, shown), more, width);
+			int moreWidth = more != null ? font.getWidth(more) + 2 : 0;
+			return new ItemGrid(groups.subList(0, shown), totals.subList(0, shown), perRow, more, moreWidth);
 		}
 
-		void draw(DrawContext context, TextRenderer font, int x, int y) {
-			for (int i = 0; i < groups.size(); i++) {
-				ItemStack stack = groups.get(i);
-				int total = totals.get(i);
-				context.drawItem(stack, x, y);
-				context.drawStackOverlay(font, stack, x, y, total > 1 ? String.valueOf(total) : null);
-				x += 18;
-			}
-			if (more != null) {
-				context.drawTextWithShadow(font, more, x + 2, y + 4, 0xFFAAAAAA);
+		int rows() {
+			return (groups.size() + perRow - 1) / perRow;
+		}
+
+		int rowWidth(int row) {
+			int count = Math.min(perRow, groups.size() - row * perRow);
+			return count * CELL + (row == rows() - 1 ? moreWidth : 0);
+		}
+
+		int width() {
+			int width = 0;
+			for (int row = 0; row < rows(); row++) width = Math.max(width, rowWidth(row));
+			return width;
+		}
+
+		int height() {
+			return rows() * CELL - 2;
+		}
+
+		void draw(DrawContext context, TextRenderer font, HudPosition position, int labelWidth, int y) {
+			for (int row = 0; row < rows(); row++) {
+				int x = position.align(labelWidth, rowWidth(row));
+				int end = Math.min(groups.size(), (row + 1) * perRow);
+				for (int i = row * perRow; i < end; i++) {
+					ItemStack stack = groups.get(i);
+					int total = totals.get(i);
+					context.drawItem(stack, x, y);
+					context.drawStackOverlay(font, stack, x, y, total > 1 ? String.valueOf(total) : null);
+					x += CELL;
+				}
+				if (row == rows() - 1 && more != null) {
+					context.drawTextWithShadow(font, more, x + 2, y + 4, 0xFFAAAAAA);
+				}
+				y += CELL;
 			}
 		}
 	}
@@ -383,14 +436,19 @@ public class ContainerPeekClient implements ClientModInitializer {
 	}
 
 	/** Identifies the server (by address) or singleplayer world (by folder name). */
-	private static String worldKey(MinecraftClient client) {
+	public static String worldKey(MinecraftClient client) {
 		ServerInfo server = client.getCurrentServerEntry();
 		if (server != null) return "server:" + server.address;
 		if (client.getServer() != null) return "local:" + client.getServer().getSaveProperties().getLevelName();
 		return null;
 	}
 
-	private static String dimensionKey(ClientWorld world) {
+	private static String blockId(ClientWorld world, Target target) {
+		if (target.kind() == ContainerKind.ENDER_CHEST) return "minecraft:ender_chest";
+		return Registries.BLOCK.getId(world.getBlockState(target.pos()).getBlock()).toString();
+	}
+
+	public static String dimensionKey(ClientWorld world) {
 		return world.getRegistryKey().getValue().toString();
 	}
 }

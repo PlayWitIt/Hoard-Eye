@@ -23,11 +23,14 @@ public final class ModConfig {
 	public boolean showNames = true;
 	public boolean showContents = true;
 	public boolean showUnknownHint = true;
+	/** Replace the text list in shulker box item tooltips with a grid of icons. */
+	public boolean shulkerTooltip = true;
 
 	/** Per-type visibility; types missing from the map are shown. */
 	public Map<ContainerKind, Boolean> containers = new EnumMap<>(ContainerKind.class);
 
 	public int maxIcons = 9;
+	public int iconsPerRow = 9;
 	public int scalePercent = 100;
 	public int yOffset = 10;
 	public HudPosition hudPosition = HudPosition.BELOW_CROSSHAIR;

@@ -33,6 +33,12 @@ public final class NameStore {
 		public String name = "";
 		/** Saved item stacks, or null if the contents were never seen. */
 		public List<JsonElement> items;
+		/** Block id, e.g. "minecraft:chest" (null for entries saved before 1.7.0). */
+		public String block;
+		/** {@link ContainerKind} name (null for entries saved before 1.7.0). */
+		public String kind;
+		/** When the contents were last seen, in epoch millis (0 if unknown). */
+		public long updated;
 		/** Decoded {@link #items}, filled lazily for rendering. */
 		public transient List<ItemStack> decoded;
 
@@ -92,12 +98,15 @@ public final class NameStore {
 		return dimension(world, dimension).get(pos.asLong());
 	}
 
-	/** Records a box's name, and its contents if {@code stacks} is non-null. */
+	/** Records a box's name and type, and its contents if {@code stacks} is non-null. */
 	public void put(String world, String dimension, BlockPos pos, String name, List<ItemStack> stacks,
-			RegistryWrapper.WrapperLookup registries) {
+			RegistryWrapper.WrapperLookup registries, String block, ContainerKind kind) {
 		Entry entry = dimension(world, dimension).computeIfAbsent(pos.asLong(), k -> new Entry());
 		entry.name = name;
+		entry.block = block;
+		entry.kind = kind.name();
 		if (stacks != null) {
+			entry.updated = System.currentTimeMillis();
 			DynamicOps<JsonElement> ops = registries.getOps(JsonOps.INSTANCE);
 			entry.items = new ArrayList<>();
 			for (ItemStack stack : stacks) {
@@ -107,6 +116,11 @@ public final class NameStore {
 			entry.decoded = null;
 		}
 		dirty = true;
+	}
+
+	/** Everything known in one server/world: dimension key to position to entry. */
+	public Map<String, Map<Long, Entry>> world(String world) {
+		return data.computeIfAbsent(world, k -> new HashMap<>());
 	}
 
 	public Map<Long, Entry> dimension(String world, String dimension) {

@@ -3,7 +3,7 @@
 	"id": "containerpeek",
 	"version": "${version}",
 	"name": "Container Peek",
-	"description": "Shows the name and contents of shulker boxes, chests, barrels and other containers next to your crosshair. Client-side only: learns them when you open or place containers.",
+	"description": "Shows the name and contents of shulker boxes, chests, barrels and other containers next to your crosshair, and previews shulker box contents in item tooltips. Client-side only.",
 	"authors": [
 		"greysworkshop"
 	],
@@ -25,5 +25,8 @@
 	},
 	"suggests": {
 		"modmenu": "*"
-	}
+	},
+	"mixins": [
+		"containerpeek.mixins.json"
+	]
 }

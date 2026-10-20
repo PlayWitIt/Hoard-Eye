@@ -40,6 +40,7 @@ public class ConfigScreen extends Screen {
 		toggle("show_names", () -> c.showNames, v -> c.showNames = v);
 		toggle("show_contents", () -> c.showContents, v -> c.showContents = v);
 		toggle("show_unknown_hint", () -> c.showUnknownHint, v -> c.showUnknownHint = v);
+		toggle("shulker_tooltip", () -> c.shulkerTooltip, v -> c.shulkerTooltip = v);
 		Text positionLabel = Text.translatable("containerpeek.config.position");
 		if (c.hudPosition == null) c.hudPosition = HudPosition.BELOW_CROSSHAIR;
 		addDrawableChild(ButtonWidget.builder(ScreenTexts.composeGenericOptionText(positionLabel, c.hudPosition.getName()), b -> {
@@ -48,6 +49,7 @@ public class ConfigScreen extends Screen {
 		}).dimensions(nextX(), nextY(), BUTTON_WIDTH, 20).build());
 		advance();
 		slider("max_icons", "", 1, 27, () -> c.maxIcons, v -> c.maxIcons = v);
+		slider("icons_per_row", "", 1, 27, () -> c.iconsPerRow, v -> c.iconsPerRow = v);
 		slider("scale", "%", 50, 200, () -> c.scalePercent, v -> c.scalePercent = v);
 		slider("y_offset", "", 0, 100, () -> c.yOffset, v -> c.yOffset = v);
 
