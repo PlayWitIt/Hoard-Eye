@@ -35,6 +35,7 @@ import net.minecraft.screen.slot.Slot;
 import net.minecraft.text.Text;
 import net.minecraft.text.TranslatableTextContent;
 import net.minecraft.util.ActionResult;
+import net.minecraft.util.Formatting;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.collection.DefaultedList;
 import net.minecraft.util.hit.BlockHitResult;
@@ -239,73 +240,111 @@ public class ContainerPeekClient implements ClientModInitializer {
 		if (world == null) return;
 
 		TextRenderer font = client.textRenderer;
-		Matrix3x2fStack matrices = context.getMatrices();
-		matrices.pushMatrix();
-		matrices.translate(context.getScaledWindowWidth() / 2f, context.getScaledWindowHeight() / 2f + config.yOffset);
-		float scale = config.scalePercent / 100f;
-		matrices.scale(scale, scale);
-		// From here on, (0, 0) is the top centre of the label.
-		int y = 0;
+		Text line = null;
+		int lineColor = 0xFFFFFFFF;
+		ItemRow row = null;
 
 		NameStore.Entry entry = store.get(world, target.dimension(), target.pos());
 		if (entry == null) {
-			if (config.showUnknownHint) {
-				Text blockName = client.world.getBlockState(hit.getBlockPos()).getBlock().getName();
-				drawCentered(context, font, Text.translatable("containerpeek.unknown", blockName), y, 0xFFAAAAAA);
+			if (!config.showUnknownHint) return;
+			Text blockName = client.world.getBlockState(hit.getBlockPos()).getBlock().getName();
+			line = Text.translatable("containerpeek.unknown", blockName);
+			lineColor = 0xFFAAAAAA;
+		} else {
+			if (config.showNames && !entry.name.isEmpty()) line = Text.literal(entry.name);
+			List<ItemStack> stacks = config.showContents ? entry.stacks(client.world.getRegistryManager()) : null;
+			if (stacks != null && !stacks.isEmpty()) {
+				row = ItemRow.of(stacks, config.maxIcons, font);
+			} else if (stacks != null && line == null) {
+				line = Text.translatable("containerpeek.empty");
+				lineColor = 0xFFAAAAAA;
+			} else if (stacks != null) {
+				line = Text.empty().append(line).append(" ")
+						.append(Text.translatable("containerpeek.empty").formatted(Formatting.GRAY));
 			}
-			matrices.popMatrix();
-			return;
 		}
-		if (config.showNames && !entry.name.isEmpty()) {
-			drawCentered(context, font, Text.literal(entry.name), y, 0xFFFFFFFF);
-			y += 11;
-		}
+		if (line == null && row == null) return;
 
-		List<ItemStack> stacks = config.showContents ? entry.stacks(client.world.getRegistryManager()) : null;
-		if (stacks != null && stacks.isEmpty()) {
-			drawCentered(context, font, Text.translatable("containerpeek.empty"), y, 0xFFAAAAAA);
-		} else if (stacks != null) {
-			drawItemRow(context, font, stacks, y, config.maxIcons);
+		// Measure the label, then place it according to the chosen position.
+		int lineWidth = line != null ? font.getWidth(line) : 0;
+		int rowWidth = row != null ? row.width() : 0;
+		int width = Math.max(lineWidth, rowWidth);
+		int height = (line != null ? 9 : 0) + (line != null && row != null ? 2 : 0) + (row != null ? 16 : 0);
+
+		HudPosition position = config.hudPosition != null ? config.hudPosition : HudPosition.BELOW_CROSSHAIR;
+		float scale = config.scalePercent / 100f;
+		float screenW = context.getScaledWindowWidth();
+		float screenH = context.getScaledWindowHeight();
+		float w = width * scale;
+		float h = height * scale;
+		int off = config.yOffset;
+		float x = switch (position) {
+			case BELOW_CROSSHAIR, ABOVE_CROSSHAIR, TOP_CENTER -> (screenW - w) / 2;
+			case RIGHT_OF_CROSSHAIR -> screenW / 2 + off;
+			case TOP_LEFT, BOTTOM_LEFT -> off;
+			case TOP_RIGHT, BOTTOM_RIGHT -> screenW - off - w;
+		};
+		float y = switch (position) {
+			case BELOW_CROSSHAIR -> screenH / 2 + off;
+			case ABOVE_CROSSHAIR -> screenH / 2 - off - h;
+			case RIGHT_OF_CROSSHAIR -> (screenH - h) / 2;
+			case TOP_LEFT, TOP_CENTER, TOP_RIGHT -> off;
+			case BOTTOM_LEFT, BOTTOM_RIGHT -> screenH - off - h;
+		};
+
+		Matrix3x2fStack matrices = context.getMatrices();
+		matrices.pushMatrix();
+		matrices.translate(Math.round(x), Math.round(y));
+		matrices.scale(scale, scale);
+		int lineY = 0;
+		if (line != null) {
+			context.drawTextWithShadow(font, line, position.align(width, lineWidth), lineY, lineColor);
+			lineY += 11;
+		}
+		if (row != null) {
+			row.draw(context, font, position.align(width, rowWidth), lineY);
 		}
 		matrices.popMatrix();
 	}
 
-	/** Draws the contents as icons, combining identical items so 27 stacks of cobblestone show "1728". */
-	private static void drawItemRow(DrawContext context, TextRenderer font, List<ItemStack> stacks, int y, int maxIcons) {
-		List<ItemStack> groups = new ArrayList<>();
-		List<Integer> totals = new ArrayList<>();
-		outer:
-		for (ItemStack stack : stacks) {
-			for (int i = 0; i < groups.size(); i++) {
-				if (ItemStack.areItemsAndComponentsEqual(groups.get(i), stack)) {
-					totals.set(i, totals.get(i) + stack.getCount());
-					continue outer;
+	/** The contents as icons, combining identical items so 27 stacks of cobblestone show "1728". */
+	private record ItemRow(List<ItemStack> groups, List<Integer> totals, String more, int width) {
+		static ItemRow of(List<ItemStack> stacks, int maxIcons, TextRenderer font) {
+			List<ItemStack> groups = new ArrayList<>();
+			List<Integer> totals = new ArrayList<>();
+			outer:
+			for (ItemStack stack : stacks) {
+				for (int i = 0; i < groups.size(); i++) {
+					if (ItemStack.areItemsAndComponentsEqual(groups.get(i), stack)) {
+						totals.set(i, totals.get(i) + stack.getCount());
+						continue outer;
+					}
 				}
+				groups.add(stack);
+				totals.add(stack.getCount());
 			}
-			groups.add(stack);
-			totals.add(stack.getCount());
+
+			int shown = Math.min(groups.size(), maxIcons);
+			int extra = groups.size() - shown;
+			String more = extra > 0 ? "+" + extra : null;
+			int width = shown * 18 + (more != null ? font.getWidth(more) + 2 : 0);
+			return new ItemRow(groups.subList(0, shown), totals.subList(0, shown), more, width);
 		}
 
-		int shown = Math.min(groups.size(), maxIcons);
-		int extra = groups.size() - shown;
-		String more = extra > 0 ? "+" + extra : null;
-		int rowWidth = shown * 18 + (more != null ? font.getWidth(more) + 2 : 0);
-		int x = -rowWidth / 2;
-		for (int i = 0; i < shown; i++) {
-			ItemStack stack = groups.get(i);
-			int total = totals.get(i);
-			context.drawItem(stack, x, y);
-			context.drawStackOverlay(font, stack, x, y, total > 1 ? String.valueOf(total) : null);
-			x += 18;
-		}
-		if (more != null) {
-			context.drawTextWithShadow(font, more, x + 2, y + 4, 0xFFAAAAAA);
+		void draw(DrawContext context, TextRenderer font, int x, int y) {
+			for (int i = 0; i < groups.size(); i++) {
+				ItemStack stack = groups.get(i);
+				int total = totals.get(i);
+				context.drawItem(stack, x, y);
+				context.drawStackOverlay(font, stack, x, y, total > 1 ? String.valueOf(total) : null);
+				x += 18;
+			}
+			if (more != null) {
+				context.drawTextWithShadow(font, more, x + 2, y + 4, 0xFFAAAAAA);
+			}
 		}
 	}
 
-	private static void drawCentered(DrawContext context, TextRenderer font, Text text, int y, int color) {
-		context.drawTextWithShadow(font, text, -font.getWidth(text) / 2, y, color);
-	}
 
 	/**
 	 * Works out where the container at {@code pos} is stored, or returns null if it isn't a container.

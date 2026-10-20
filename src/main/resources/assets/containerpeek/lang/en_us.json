@@ -13,10 +13,19 @@
 	"containerpeek.config.show_unknown_hint": "\"Open once\" hint",
 	"containerpeek.config.max_icons": "Max icons",
 	"containerpeek.config.scale": "Size",
-	"containerpeek.config.y_offset": "Distance below crosshair",
+	"containerpeek.config.y_offset": "Offset",
 	"containerpeek.config.containers": "Containers...",
 	"containerpeek.config.containers_title": "Which containers to show",
 	"containerpeek.config.show_all": "Show all",
 	"containerpeek.config.hide_all": "Hide all",
-	"containerpeek.config.kind.other": "Other (modded)"
+	"containerpeek.config.kind.other": "Other (modded)",
+	"containerpeek.config.position": "Position",
+	"containerpeek.config.position.below_crosshair": "Below crosshair",
+	"containerpeek.config.position.above_crosshair": "Above crosshair",
+	"containerpeek.config.position.right_of_crosshair": "Right of crosshair",
+	"containerpeek.config.position.top_left": "Top left",
+	"containerpeek.config.position.top_center": "Top center",
+	"containerpeek.config.position.top_right": "Top right",
+	"containerpeek.config.position.bottom_left": "Bottom left",
+	"containerpeek.config.position.bottom_right": "Bottom right"
 }

@@ -30,6 +30,7 @@ public final class ModConfig {
 	public int maxIcons = 9;
 	public int scalePercent = 100;
 	public int yOffset = 10;
+	public HudPosition hudPosition = HudPosition.BELOW_CROSSHAIR;
 
 	// Group switches from 1.2.0, read once and converted into `containers`.
 	private Boolean shulkerBoxes;
