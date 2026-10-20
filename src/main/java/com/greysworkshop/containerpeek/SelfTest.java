@@ -198,6 +198,44 @@ public final class SelfTest {
 			case 465 -> showSettingsTab(client, 4);
 			case 475 -> screenshot(client, "8_settings_data");
 			case 480 -> {
+				log("Fetch list: 2 stacks of diamonds and 1 of rockets");
+				client.setScreen(new SearchScreen());
+			}
+			case 485 -> {
+				if (client.currentScreen instanceof SearchScreen s) {
+					s.testQuery("");
+					s.testFetch("Diamond", 2);
+					s.testFetch("Firework Rocket", 1);
+					s.testShowFetch();
+				}
+			}
+			case 495 -> {
+				if (client.currentScreen instanceof SearchScreen s) {
+					check("fetch route planned (" + s.testRouteStops() + " stops)", s.testRouteStops() >= 2);
+				}
+				screenshot(client, "9_fetch_list");
+			}
+			case 500 -> {
+				if (client.currentScreen instanceof SearchScreen s) s.testStartRoute();
+			}
+			case 505 -> check("route started at stop 1", Locator.onRoute() && Locator.routeIndex() == 0);
+			case 510 -> aimAt(client, Locator.currentStop().pos());
+			case 518 -> screenshot(client, "9b_fetch_strip");
+			case 520 -> {
+				BlockPos pos = Locator.currentStop().pos();
+				BlockHitResult hit = new BlockHitResult(Vec3d.ofCenter(pos).add(0, 0.5, 0), Direction.UP, pos, false);
+				client.interactionManager.interactBlock(client.player, Hand.MAIN_HAND, hit);
+			}
+			case 535 -> {
+				check("opening the stop's container moves the route on (now at stop " + (Locator.routeIndex() + 1) + ")",
+						Locator.routeIndex() == 1 || !Locator.onRoute());
+				screenshot(client, "9c_fetch_take_here");
+			}
+			case 545 -> {
+				client.player.closeHandledScreen();
+				Locator.stop();
+			}
+			case 550 -> {
 				client.setScreen(null);
 				log("DONE");
 				client.scheduleStop();

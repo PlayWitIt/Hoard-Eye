@@ -36,7 +36,7 @@ import java.util.Set;
  * walk you to it.
  */
 public class SearchScreen extends Screen {
-	private enum View { ITEMS, CONTAINERS }
+	private enum View { ITEMS, CONTAINERS, FETCH }
 
 	private enum ItemSort { COUNT, NAME, NEAREST, SPREAD }
 
@@ -120,6 +120,7 @@ public class SearchScreen extends Screen {
 	private ButtonWidget findButton;
 	private ButtonWidget allButton;
 	private ButtonWidget stopButton;
+	private ButtonWidget fetchButton;
 	private ItemStack hoveredStack = ItemStack.EMPTY;
 	private int hoverX;
 	private int hoverY;
@@ -297,6 +298,7 @@ public class SearchScreen extends Screen {
 		if (selectedGroup == null && !groups.isEmpty()) selectedGroup = groups.get(0);
 		if (selectedBox != null && !boxes.contains(selectedBox)) selectedBox = null;
 		if (selectedBox == null && !boxes.isEmpty()) selectedBox = boxes.get(0);
+		if (view == View.FETCH) planFetch();
 		leftScroll = Math.min(leftScroll, maxLeftScroll());
 		rightScroll = 0;
 		updateButtons();
@@ -336,14 +338,15 @@ public class SearchScreen extends Screen {
 		int buttonWidth = Math.min(120, (contentWidth - 4 * 4) / 5);
 		int x = PAD;
 		addDrawableChild(cycle(x, buttonY, buttonWidth, this::viewLabel, () -> {
-			view = view == View.ITEMS ? View.CONTAINERS : View.ITEMS;
+			view = View.values()[(view.ordinal() + 1) % View.values().length];
 			leftScroll = 0;
 		}));
 		x += buttonWidth + 4;
-		addDrawableChild(cycle(x, buttonY, buttonWidth, this::sortLabel, () -> {
+		ButtonWidget sortButton = addDrawableChild(cycle(x, buttonY, buttonWidth, this::sortLabel, () -> {
 			if (view == View.ITEMS) itemSort = ItemSort.values()[(itemSort.ordinal() + 1) % ItemSort.values().length];
-			else boxSort = BoxSort.values()[(boxSort.ordinal() + 1) % BoxSort.values().length];
+			else if (view == View.CONTAINERS) boxSort = BoxSort.values()[(boxSort.ordinal() + 1) % BoxSort.values().length];
 		}));
+		sortButton.active = view != View.FETCH;
 		x += buttonWidth + 4;
 		addDrawableChild(cycle(x, buttonY, buttonWidth, () -> label("scope", scope.name()), () ->
 				scope = scope == Scope.ALL ? Scope.HERE : Scope.ALL));
@@ -361,10 +364,24 @@ public class SearchScreen extends Screen {
 		rightX1 = width - PAD;
 
 		int half = (rightX1 - rightX0 - 12) / 2;
-		findButton = addDrawableChild(ButtonWidget.builder(Text.translatable("containerpeek.search.find"), b -> findNearest())
-				.dimensions(rightX0 + 4, bodyBottom - 24, half, 20).build());
-		allButton = addDrawableChild(ButtonWidget.builder(Text.empty(), b -> highlightAll())
-				.dimensions(rightX0 + 8 + half, bodyBottom - 24, half, 20).build());
+		findButton = addDrawableChild(ButtonWidget.builder(Text.translatable("containerpeek.search.find"), b -> {
+			if (view == View.FETCH) startRoute();
+			else findNearest();
+		}).dimensions(rightX0 + 4, bodyBottom - 24, half, 20).build());
+		allButton = addDrawableChild(ButtonWidget.builder(Text.empty(), b -> {
+			if (view == View.FETCH) {
+				Fetch.clear();
+				refresh();
+			} else {
+				highlightAll();
+			}
+		}).dimensions(rightX0 + 8 + half, bodyBottom - 24, half, 20).build());
+		fetchButton = addDrawableChild(ButtonWidget.builder(Text.translatable("containerpeek.fetch.add"), b -> {
+			if (selectedGroup != null) {
+				Fetch.addStack(selectedGroup.icon);
+				updateButtons();
+			}
+		}).dimensions(rightX1 - 64, bodyTop + 18, 58, 20).build());
 		stopButton = addDrawableChild(ButtonWidget.builder(Text.translatable("containerpeek.search.stop"), b -> {
 			Locator.stop();
 			updateButtons();
@@ -391,6 +408,7 @@ public class SearchScreen extends Screen {
 	}
 
 	private Text sortLabel() {
+		if (view == View.FETCH) return Text.translatable("containerpeek.search.sort", "—");
 		return label("sort", view == View.ITEMS ? itemSort.name() : boxSort.name());
 	}
 
@@ -401,11 +419,63 @@ public class SearchScreen extends Screen {
 
 	private void updateButtons() {
 		if (findButton == null) return;
+		stopButton.visible = Locator.active();
+		fetchButton.visible = view == View.ITEMS && selectedGroup != null;
+		if (fetchButton.visible) {
+			fetchButton.setTooltip(net.minecraft.client.gui.tooltip.Tooltip.of(Text.translatable("containerpeek.fetch.add.tooltip", Fetch.size())));
+		}
+		if (view == View.FETCH) {
+			findButton.setMessage(Text.translatable("containerpeek.fetch.start"));
+			findButton.active = !fetchRoute.isEmpty();
+			allButton.setMessage(Text.translatable("containerpeek.fetch.clear"));
+			allButton.active = Fetch.size() > 0;
+			return;
+		}
 		List<Locator.Target> targets = currentTargets();
+		findButton.setMessage(Text.translatable("containerpeek.search.find"));
 		findButton.active = !targets.isEmpty();
 		allButton.active = targets.size() > 1;
 		allButton.setMessage(Text.translatable("containerpeek.search.highlight_all", targets.size()));
-		stopButton.visible = Locator.active();
+	}
+
+	// ---- Fetch list ----
+
+	private List<Fetch.Stop> fetchRoute = new ArrayList<>();
+	private final List<String> fetchShortages = new ArrayList<>();
+	private final Map<String, Integer> fetchAvailable = new LinkedHashMap<>();
+	private record Hit(int x0, int y0, int x1, int y1, Runnable run) {}
+	private final List<Hit> fetchHits = new ArrayList<>();
+
+	/** Containers in this dimension you can walk to, with how many of each item they hold. */
+	private List<Fetch.Candidate> candidates() {
+		MinecraftClient mc = MinecraftClient.getInstance();
+		String here = ContainerPeekClient.dimensionKey(mc.world);
+		List<Fetch.Candidate> result = new ArrayList<>();
+		for (Box box : allBoxes) {
+			if (!box.findable() || !box.dimension.equals(here)) continue;
+			Map<String, Integer> counts = new LinkedHashMap<>();
+			for (ItemStack stack : box.stacks) counts.merge(Fetch.key(stack), stack.getCount(), Integer::sum);
+			result.add(new Fetch.Candidate(box.dimension, box.pos, box.label, box.icon, counts, box.distance));
+		}
+		return result;
+	}
+
+	private void planFetch() {
+		fetchShortages.clear();
+		fetchAvailable.clear();
+		MinecraftClient mc = MinecraftClient.getInstance();
+		if (mc.player == null) return;
+		List<Fetch.Candidate> candidates = candidates();
+		for (Fetch.Candidate candidate : candidates) {
+			candidate.counts().forEach((key, count) -> fetchAvailable.merge(key, count, Integer::sum));
+		}
+		fetchRoute = Fetch.plan(candidates, mc.player.getEyePos(), fetchShortages);
+	}
+
+	private void startRoute() {
+		if (fetchRoute.isEmpty()) return;
+		Locator.guideRoute(fetchRoute);
+		close();
 	}
 
 	// ---- Actions ----
@@ -463,6 +533,16 @@ public class SearchScreen extends Screen {
 	@Override
 	public boolean mouseClicked(Click click, boolean doubled) {
 		if (super.mouseClicked(click, doubled)) return true;
+		if (view == View.FETCH) {
+			for (Hit hit : List.copyOf(fetchHits)) {
+				if (click.x() >= hit.x0 && click.x() < hit.x1 && click.y() >= hit.y0 && click.y() < hit.y1) {
+					hit.run.run();
+					refresh();
+					return true;
+				}
+			}
+			return false;
+		}
 		double mx = click.x(), my = click.y();
 		boolean shift = (click.modifiers() & GLFW.GLFW_MOD_SHIFT) != 0;
 		int listTop = bodyTop + 16;
@@ -548,11 +628,12 @@ public class SearchScreen extends Screen {
 	}
 
 	private double maxLeftScroll() {
-		int count = view == View.ITEMS ? groups.size() : boxes.size();
+		int count = view == View.ITEMS ? groups.size() : view == View.FETCH ? Fetch.size() : boxes.size();
 		return Math.max(0, count * ROW - (bodyBottom - bodyTop - 16));
 	}
 
 	private double maxRightScroll() {
+		if (view == View.FETCH) return Math.max(0, routeHeight - (bodyBottom - 28 - (bodyTop + 20)));
 		if (view != View.ITEMS || selectedGroup == null) return 0;
 		return Math.max(0, selectedGroup.sorted.size() * LOC_ROW - (bodyBottom - 28 - (bodyTop + 50)));
 	}
@@ -572,11 +653,16 @@ public class SearchScreen extends Screen {
 		panel(context, PAD, 23, width - PAD, 43);
 
 		// Left list.
-		String leftTitle = view == View.ITEMS
-				? Text.translatable("containerpeek.search.items_header", groups.size()).getString()
-				: Text.translatable("containerpeek.search.containers_header", boxes.size()).getString();
+		String leftTitle = switch (view) {
+			case ITEMS -> Text.translatable("containerpeek.search.items_header", groups.size()).getString();
+			case CONTAINERS -> Text.translatable("containerpeek.search.containers_header", boxes.size()).getString();
+			case FETCH -> Text.translatable("containerpeek.fetch.header", Fetch.size()).getString();
+		};
 		panelWithHeader(context, leftX0, bodyTop, leftX1, bodyBottom, leftTitle);
-		if (allBoxes.isEmpty()) {
+		fetchHits.clear();
+		if (view == View.FETCH) {
+			drawFetchList(context, mouseX, mouseY);
+		} else if (allBoxes.isEmpty()) {
 			drawWrapped(context, Text.translatable("containerpeek.search.empty_world").getString(), leftX0 + 6, bodyTop + 22, leftX1 - leftX0 - 12, GRAY);
 		} else if (view == View.ITEMS) {
 			drawGroupList(context, mouseX, mouseY);
@@ -585,12 +671,19 @@ public class SearchScreen extends Screen {
 		}
 
 		// Right details.
-		panelWithHeader(context, rightX0, bodyTop, rightX1, bodyBottom, Text.translatable("containerpeek.search.details").getString());
+		panelWithHeader(context, rightX0, bodyTop, rightX1, bodyBottom, view == View.FETCH
+				? Text.translatable("containerpeek.fetch.route_header", fetchRoute.size()).getString()
+				: Text.translatable("containerpeek.search.details").getString());
 		if (view == View.ITEMS) drawGroupDetails(context, mouseX, mouseY);
-		else drawBoxDetails(context, mouseX, mouseY);
+		else if (view == View.CONTAINERS) drawBoxDetails(context, mouseX, mouseY);
+		else drawRoute(context);
 
 		// Footer hint.
-		String hint = Text.translatable(view == View.ITEMS ? "containerpeek.search.hint_items" : "containerpeek.search.hint_containers").getString();
+		String hint = Text.translatable(switch (view) {
+			case ITEMS -> "containerpeek.search.hint_items";
+			case CONTAINERS -> "containerpeek.search.hint_containers";
+			case FETCH -> "containerpeek.fetch.hint";
+		}).getString();
 		context.drawTextWithShadow(font, font.trimToWidth(hint, width - 2 * PAD - (Locator.active() ? 108 : 0)), PAD, height - 18, DIM);
 	}
 
@@ -664,9 +757,9 @@ public class SearchScreen extends Screen {
 		bigIcon(context, group.icon, x, y);
 		if (mouseX >= x && mouseX < x + 32 && mouseY >= y && mouseY < y + 32) setHovered(group.icon, mouseX, mouseY);
 		int textX = x + 38;
-		context.drawTextWithShadow(textRenderer, textRenderer.trimToWidth(group.name, rightX1 - textX - 6), textX, y + 4, WHITE);
+		context.drawTextWithShadow(textRenderer, textRenderer.trimToWidth(group.name, rightX1 - textX - 70), textX, y + 4, WHITE);
 		String summary = Text.translatable("containerpeek.search.group_summary", fmt(group.total), group.spread()).getString();
-		context.drawTextWithShadow(textRenderer, textRenderer.trimToWidth(summary, rightX1 - textX - 6), textX, y + 17, GOLD);
+		context.drawTextWithShadow(textRenderer, textRenderer.trimToWidth(summary, rightX1 - textX - 70), textX, y + 17, GOLD);
 
 		int top = bodyTop + 50;
 		int bottom = bodyBottom - 28;
@@ -726,6 +819,88 @@ public class SearchScreen extends Screen {
 		}
 		if (stacks.isEmpty()) context.drawTextWithShadow(textRenderer, Text.translatable("containerpeek.empty"), gridX, gridY, GRAY);
 	}
+
+	/** The fetch list: each item with how many you want and how many are stored, plus − / + / ✖ chips. */
+	private void drawFetchList(DrawContext context, int mouseX, int mouseY) {
+		int top = bodyTop + 16;
+		List<Fetch.Want> wants = Fetch.wants();
+		if (wants.isEmpty()) {
+			drawWrapped(context, Text.translatable("containerpeek.fetch.empty").getString(), leftX0 + 6, top + 6, leftX1 - leftX0 - 12, GRAY);
+			return;
+		}
+		context.enableScissor(leftX0 + 1, top, leftX1 - 1, bodyBottom - 1);
+		int y = top - (int) leftScroll;
+		for (Fetch.Want want : wants) {
+			if (y + ROW >= top && y <= bodyBottom) {
+				boolean hovered = mouseX >= leftX0 && mouseX < leftX1 && mouseY >= y && mouseY < y + ROW;
+				if (hovered) context.fill(leftX0 + 1, y, leftX1 - 1, y + ROW, HOVER);
+				context.drawItem(want.icon, leftX0 + 5, y + 2);
+				int have = fetchAvailable.getOrDefault(want.key, 0);
+				String count = "×" + fmt(want.count);
+				String stock = Text.translatable("containerpeek.fetch.stored", fmt(have)).getString();
+				int chipsWidth = 3 * 16;
+				int x = leftX1 - 6 - chipsWidth;
+				// Right to left: chips, stored, wanted; the name gets whatever room is left.
+				int stockX = x - 6 - textRenderer.getWidth(stock);
+				int countX = stockX - 6 - textRenderer.getWidth(count);
+				context.drawTextWithShadow(textRenderer, textRenderer.trimToWidth(want.name, Math.max(0, countX - leftX0 - 30)), leftX0 + 25, y + 6, WHITE);
+				context.drawTextWithShadow(textRenderer, count, countX, y + 6, GOLD);
+				context.drawTextWithShadow(textRenderer, stock, stockX, y + 6, have >= want.count ? 0xFF55FF55 : 0xFFFF7070);
+				x = chip(context, x, y + 3, "−", 0xFFFFAA40, mouseX, mouseY, () -> Fetch.adjust(want.key, -1));
+				x = chip(context, x, y + 3, "+", 0xFF55CC55, mouseX, mouseY, () -> Fetch.adjust(want.key, 1));
+				chip(context, x, y + 3, "✖", 0xFFFF5555, mouseX, mouseY, () -> Fetch.remove(want.key));
+			}
+			y += ROW;
+		}
+		context.disableScissor();
+	}
+
+	private int chip(DrawContext context, int x, int y, String label, int color, int mouseX, int mouseY, Runnable action) {
+		boolean over = mouseX >= x && mouseX < x + 14 && mouseY >= y && mouseY < y + 14;
+		context.fill(x, y, x + 14, y + 14, (color & 0xFFFFFF) | (over ? 0x70000000 : 0x30000000));
+		context.drawStrokedRectangle(x, y, 14, 14, color);
+		context.drawTextWithShadow(textRenderer, label, x + 7 - textRenderer.getWidth(label) / 2, y + 3, over ? 0xFFFFFFFF : color);
+		if (y >= bodyTop + 16 && y + 14 <= bodyBottom) fetchHits.add(new Hit(x, y, x + 14, y + 14, action));
+		return x + 16;
+	}
+
+	/** The planned route: each stop and what to take there, plus anything that can't be found in full. */
+	private void drawRoute(DrawContext context) {
+		int x = rightX0 + 6;
+		int y = bodyTop + 20;
+		int width = rightX1 - rightX0 - 12;
+		if (Fetch.size() == 0) {
+			drawWrapped(context, Text.translatable("containerpeek.fetch.route_empty").getString(), x, y, width, GRAY);
+			return;
+		}
+		int bottom = bodyBottom - 28;
+		int start = y;
+		context.enableScissor(rightX0 + 1, y - 2, rightX1 - 1, bottom);
+		y -= (int) rightScroll;
+		// Shortages first: they're what you need to know before setting off.
+		for (String shortage : fetchShortages) {
+			context.drawTextWithShadow(textRenderer, textRenderer.trimToWidth("⚠ " + shortage, width), x, y, 0xFFFF7070);
+			y += 11;
+		}
+		if (!fetchShortages.isEmpty()) y += 4;
+		for (int i = 0; i < fetchRoute.size(); i++) {
+			Fetch.Stop stop = fetchRoute.get(i);
+			context.drawItem(stop.icon(), x, y);
+			double distance = MinecraftClient.getInstance().player.getEyePos().distanceTo(net.minecraft.util.math.Vec3d.ofCenter(stop.pos()));
+			context.drawTextWithShadow(textRenderer, textRenderer.trimToWidth((i + 1) + ". " + stop.label() + "  (" + (int) distance + "m)", width - 20), x + 20, y + 4, WHITE);
+			y += 18;
+			for (Fetch.Take take : stop.takes()) {
+				context.drawTextWithShadow(textRenderer, textRenderer.trimToWidth("   " + take.count() + " × " + take.name(), width - 20), x + 20, y, GRAY);
+				y += 10;
+			}
+			y += 4;
+		}
+		context.disableScissor();
+		routeHeight = y + (int) rightScroll - start;
+		scrollbar(context, rightX1 - 4, start - 2, bottom, rightScroll, maxRightScroll());
+	}
+
+	private int routeHeight;
 
 	private void setHovered(ItemStack stack, int x, int y) {
 		hoveredStack = stack;
@@ -834,6 +1009,26 @@ public class SearchScreen extends Screen {
 	/** Total count of the item with this display name in the current results, or -1 if absent. */
 	public int testTotal(String name) {
 		return groups.stream().filter(g -> g.name.equals(name)).mapToInt(g -> g.total).findFirst().orElse(-1);
+	}
+
+	/** Adds the selected item to the fetch list, switches to the fetch view and starts the route; for the self-test. */
+	public void testFetch(String itemName, int stacks) {
+		for (Group group : groups) {
+			if (group.name.equals(itemName)) for (int i = 0; i < stacks; i++) Fetch.addStack(group.icon);
+		}
+	}
+
+	public void testShowFetch() {
+		view = View.FETCH;
+		clearAndInit();
+	}
+
+	public int testRouteStops() {
+		return fetchRoute.size();
+	}
+
+	public void testStartRoute() {
+		startRoute();
 	}
 
 	public void testHighlightAll() {

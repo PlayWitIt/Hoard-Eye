@@ -140,11 +140,19 @@ public class ContainerPeekClient implements ClientModInitializer {
 			String name = titleToName(screen.getTitle());
 			pendingOpen = null;
 			String block = blockId(client.world, target);
+			// A fetch-route stop: show what to take, and head on to the next stop.
+			Fetch.Stop stop = Locator.routeStopAt(target.dimension(), target.pos());
+			if (stop != null) {
+				Fetch.onOpened(stop);
+				Locator.advanceRoute();
+				ScreenEvents.afterRender(screen).register((s, context, mouseX, mouseY, delta) -> Fetch.renderInScreen(handled, context));
+			}
 			store.put(world, target.dimension(), target.pos(), name, null, client.world.getRegistryManager(), block, target.kind());
 			store.saveIfDirty();
 
 			// Slots fill in after the screen opens, so read the contents when it closes.
 			ScreenEvents.remove(screen).register(closed -> {
+				Fetch.onClosed();
 				if (client.world == null || !world.equals(worldKey(client))) return;
 				List<ItemStack> items = containerStacks(handled.getScreenHandler());
 				store.put(world, target.dimension(), target.pos(), name, items, client.world.getRegistryManager(), block, target.kind());

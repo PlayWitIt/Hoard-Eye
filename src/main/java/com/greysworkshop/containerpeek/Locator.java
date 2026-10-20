@@ -40,18 +40,77 @@ public final class Locator {
 	public static String lastMarker = "";
 	private static String what = "";
 	private static long foundUntil;
+	/** A fetch route being followed (null if not): stops advance when you open their container. */
+	private static List<Fetch.Stop> route;
+	private static int routeIndex;
 
 	private Locator() {}
 
 	/** Starts guiding to these containers; {@code what} describes what you're looking for. */
 	public static void guide(List<Target> list, String what) {
+		route = null;
 		targets.clear();
 		targets.addAll(list);
 		Locator.what = what;
 		foundUntil = 0;
 	}
 
+	/** Starts a fetch route: guides to each stop in turn. */
+	public static void guideRoute(List<Fetch.Stop> stops) {
+		route = new ArrayList<>(stops);
+		routeIndex = 0;
+		foundUntil = 0;
+		showStop();
+	}
+
+	private static void showStop() {
+		targets.clear();
+		Fetch.Stop stop = route.get(routeIndex);
+		targets.add(new Target(stop.dimension(), stop.pos(), stop.label(), stop.takes().get(0).icon()));
+		String takes = stop.takes().get(0).count() + " " + stop.takes().get(0).name()
+				+ (stop.takes().size() > 1 ? " +" + (stop.takes().size() - 1) + " more" : "");
+		what = Text.translatable("containerpeek.fetch.stop", routeIndex + 1, route.size(), takes).getString();
+	}
+
+	/** The route stop at this container, if it's the one you're heading to. */
+	public static Fetch.Stop routeStopAt(String dimension, BlockPos pos) {
+		if (route == null) return null;
+		Fetch.Stop stop = route.get(routeIndex);
+		return stop.dimension().equals(dimension) && stop.pos().equals(pos) ? stop : null;
+	}
+
+	/** You opened the current stop's container: move on to the next stop, or finish. */
+	public static void advanceRoute() {
+		if (route == null) return;
+		MinecraftClient client = MinecraftClient.getInstance();
+		if (++routeIndex >= route.size()) {
+			route = null;
+			targets.clear();
+			foundUntil = System.currentTimeMillis() + 3000;
+			Fetch.clear();
+		} else {
+			showStop();
+		}
+		if (ModConfig.INSTANCE.foundSound) {
+			client.getSoundManager().play(PositionedSoundInstance.ui(SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP, route == null ? 1.0f : 1.5f));
+		}
+	}
+
+	/** Which stop you're heading to (0-based); for the self-test. */
+	public static int routeIndex() {
+		return route == null ? -1 : routeIndex;
+	}
+
+	public static Fetch.Stop currentStop() {
+		return route == null ? null : route.get(routeIndex);
+	}
+
+	public static boolean onRoute() {
+		return route != null;
+	}
+
 	public static void stop() {
+		route = null;
 		targets.clear();
 	}
 
@@ -64,7 +123,8 @@ public final class Locator {
 	}
 
 	public static void tick(MinecraftClient client) {
-		if (targets.isEmpty() || client.player == null || client.world == null) return;
+		// On a route, stops are done when you open them, not when you walk past.
+		if (targets.isEmpty() || route != null || client.player == null || client.world == null) return;
 		String dimension = ContainerPeekClient.dimensionKey(client.world);
 		double reach = ModConfig.INSTANCE.locatorReach + 0.5;
 		boolean removed = targets.removeIf(t -> t.dimension.equals(dimension)
@@ -119,7 +179,7 @@ public final class Locator {
 		float relative = MathHelper.wrapDegrees(targetYaw - client.player.getYaw());
 		String arrow = ARROWS[Math.floorMod(Math.round(relative / 45f), 8)];
 		String vertical = to.y > 3 ? "  ▲" + (int) to.y : to.y < -3 ? "  ▼" + (int) -to.y : "";
-		String more = targets.size() > 1 ? "  (+" + (targets.size() - 1) + ")" : "";
+		String more = targets.size() > 1 && route == null ? "  (+" + (targets.size() - 1) + ")" : "";
 
 		Text text = Text.literal(arrow + "  ").append(Text.literal(what).styled(s -> s.withColor(0xFFFFFF)))
 				.append(Text.literal("  " + target.label + "  " + distance + "m" + vertical + more).styled(s -> s.withColor(0xBBBBBB)));

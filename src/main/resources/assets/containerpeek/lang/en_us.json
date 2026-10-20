@@ -160,5 +160,18 @@
 	"containerpeek.config.open_folder.desc": "Open the folder with Container Peek's files.",
 	"containerpeek.config.open_folder.button": "Open folder",
 	"containerpeek.config.locator_markers": "Waypoint markers",
-	"containerpeek.config.locator_markers.desc": "Show each container you're looking for as an icon with its distance on screen, visible through walls. When it's behind you or off-screen, the marker sits at the edge with an arrow pointing the way."
+	"containerpeek.config.locator_markers.desc": "Show each container you're looking for as an icon with its distance on screen, visible through walls. When it's behind you or off-screen, the marker sits at the edge with an arrow pointing the way.",
+	"containerpeek.search.view.fetch": "⇩ Fetch list",
+	"containerpeek.fetch.add": "+ Fetch",
+	"containerpeek.fetch.add.tooltip": "Add a stack of this to your fetch list (%s items on it now). See it under View: Fetch list.",
+	"containerpeek.fetch.header": "Fetch list (%s)",
+	"containerpeek.fetch.route_header": "Route · %s stops",
+	"containerpeek.fetch.start": "▶ Start route",
+	"containerpeek.fetch.clear": "Clear list",
+	"containerpeek.fetch.stored": "%s stored",
+	"containerpeek.fetch.empty": "Your fetch list is empty. In the Items view, select something and press + Fetch to add a stack of it.",
+	"containerpeek.fetch.route_empty": "Add items to plan a route through your containers, nearest first.",
+	"containerpeek.fetch.hint": "− / + change amounts by a stack · Start route walks you to each container and shows what to take there",
+	"containerpeek.fetch.stop": "Stop %s/%s · take %s",
+	"containerpeek.fetch.take_here": "Take from here:"
 }
