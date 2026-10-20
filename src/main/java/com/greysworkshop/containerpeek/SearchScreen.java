@@ -320,6 +320,12 @@ public class SearchScreen extends Screen {
 
 	@Override
 	protected void init() {
+		String handedOver = Fetch.importHandOff();
+		if (handedOver != null) {
+			// Another mod sent a list: show it straight away.
+			view = View.FETCH;
+			handOffNote = Text.translatable("containerpeek.fetch.imported", handedOver).getString();
+		}
 		loadBoxes();
 
 		int contentWidth = width - 2 * PAD;
@@ -877,6 +883,13 @@ public class SearchScreen extends Screen {
 		int start = y;
 		context.enableScissor(rightX0 + 1, y - 2, rightX1 - 1, bottom);
 		y -= (int) rightScroll;
+		if (handOffNote != null) {
+			for (var line : textRenderer.wrapLines(Text.literal(handOffNote), width)) {
+				context.drawTextWithShadow(textRenderer, line, x, y, ACCENT);
+				y += 10;
+			}
+			y += 4;
+		}
 		// Shortages first: they're what you need to know before setting off.
 		for (String shortage : fetchShortages) {
 			context.drawTextWithShadow(textRenderer, textRenderer.trimToWidth("⚠ " + shortage, width), x, y, 0xFFFF7070);
@@ -901,6 +914,7 @@ public class SearchScreen extends Screen {
 	}
 
 	private int routeHeight;
+	private String handOffNote;
 
 	private void setHovered(ItemStack stack, int x, int y) {
 		hoveredStack = stack;

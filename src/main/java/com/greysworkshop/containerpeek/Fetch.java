@@ -86,6 +86,32 @@ public final class Fetch {
 	}
 
 	/**
+	 * Picks up a list handed over by another mod (Base Insurance's "Fetch with Container Peek"), replacing the
+	 * current list. Returns who sent it, or null if there was nothing to pick up.
+	 */
+	public static String importHandOff() {
+		java.nio.file.Path file = net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir().resolve("containerpeek-fetch.json");
+		if (!java.nio.file.Files.exists(file)) return null;
+		try {
+			com.google.gson.JsonObject root = com.google.gson.JsonParser.parseString(java.nio.file.Files.readString(file)).getAsJsonObject();
+			java.nio.file.Files.delete(file);
+			wants.clear();
+			for (com.google.gson.JsonElement element : root.getAsJsonArray("items")) {
+				com.google.gson.JsonObject item = element.getAsJsonObject();
+				net.minecraft.util.Identifier id = net.minecraft.util.Identifier.tryParse(item.get("id").getAsString());
+				if (id == null || !Registries.ITEM.containsId(id)) continue;
+				ItemStack stack = new ItemStack(Registries.ITEM.get(id));
+				String key = key(stack);
+				wants.put(key, new Want(key, stack, stack.getName().getString(), item.get("count").getAsInt()));
+			}
+			return root.has("from") ? root.get("from").getAsString() : "another mod";
+		} catch (Exception e) {
+			ContainerPeekClient.LOGGER.warn("Could not read handed-over fetch list", e);
+			return null;
+		}
+	}
+
+	/**
 	 * Picks containers for each item, nearest first, until there's enough, then orders the stops so each is
 	 * the nearest unvisited one to the last. Anything that can't be found in full is added to {@code shortages}.
 	 */

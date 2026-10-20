@@ -173,5 +173,6 @@
 	"containerpeek.fetch.route_empty": "Add items to plan a route through your containers, nearest first.",
 	"containerpeek.fetch.hint": "− / + change amounts by a stack · Start route walks you to each container and shows what to take there",
 	"containerpeek.fetch.stop": "Stop %s/%s · take %s",
-	"containerpeek.fetch.take_here": "Take from here:"
+	"containerpeek.fetch.take_here": "Take from here:",
+	"containerpeek.fetch.imported": "From %s: the materials you need. Start the route to collect them."
 }
