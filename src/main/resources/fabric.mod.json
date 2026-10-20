@@ -1,0 +1,19 @@
+{
+	"schemaVersion": 1,
+	"id": "shulkernames",
+	"version": "${version}",
+	"name": "Shulker Names",
+	"description": "Shows a shulker box's name and contents next to your crosshair when you look at it. Client-side only: learns names when you open or place boxes.",
+	"authors": ["greysworkshop"],
+	"license": "MIT",
+	"environment": "client",
+	"entrypoints": {
+		"client": ["com.greysworkshop.shulkernames.ShulkerNamesClient"]
+	},
+	"depends": {
+		"fabricloader": ">=0.18.0",
+		"minecraft": "~1.21.11",
+		"java": ">=21",
+		"fabric-api": "*"
+	}
+}
