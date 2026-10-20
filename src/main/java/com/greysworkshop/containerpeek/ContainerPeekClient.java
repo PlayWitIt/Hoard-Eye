@@ -87,6 +87,7 @@ public class ContainerPeekClient implements ClientModInitializer {
 	private List<ItemStack> pendingPlaceItems;
 	private int pendingPlaceTicks;
 	private int cleanupTimer;
+	private int hintTimer;
 
 	@Override
 	public void onInitializeClient() {
@@ -221,6 +222,17 @@ public class ContainerPeekClient implements ClientModInitializer {
 
 		Locator.tick(client);
 		if (client.world == null || !ModConfig.INSTANCE.enabled) return;
+		// Once, after you've opened a few containers, mention the search so it gets found.
+		if (!ModConfig.INSTANCE.seenHint && ++hintTimer % 100 == 0 && worldKey(client) != null
+				&& store.world(worldKey(client)).values().stream().mapToInt(Map::size).sum() >= 3) {
+			ModConfig.INSTANCE.seenHint = true;
+			ModConfig.save();
+			client.inGameHud.getChatHud().addMessage(Text.empty()
+					.append(Text.literal("[Container Peek] ").formatted(Formatting.GOLD))
+					.append(Text.literal("Tip: press ").formatted(Formatting.GRAY))
+					.append(searchKey.getBoundKeyLocalizedText().copy().formatted(Formatting.AQUA))
+					.append(Text.literal(" to search everything in your containers and get walked to it.").formatted(Formatting.GRAY)));
+		}
 		String world = worldKey(client);
 		if (world == null) return;
 		String dimension = dimensionKey(client.world);

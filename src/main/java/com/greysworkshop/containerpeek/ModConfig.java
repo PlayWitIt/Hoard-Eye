@@ -61,6 +61,8 @@ public final class ModConfig {
 	public int locatorReach = 4;
 	public StripPosition stripPosition = StripPosition.TOP;
 	public boolean foundSound = true;
+	/** Whether the one-time "press Y to search" hint has been shown. */
+	public boolean seenHint = false;
 
 	public boolean showNames = true;
 	public boolean showContents = true;
