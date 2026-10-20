@@ -28,5 +28,6 @@
 	},
 	"mixins": [
 		"containerpeek.mixins.json"
-	]
+	],
+	"icon": "assets/containerpeek/icon.png"
 }
