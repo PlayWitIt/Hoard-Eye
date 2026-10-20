@@ -1,0 +1,22 @@
+{
+	"containerpeek.unknown": "%s (open once to remember)",
+	"containerpeek.empty": "(empty)",
+	"containerpeek.toggled_on": "Container labels: ON",
+	"containerpeek.toggled_off": "Container labels: OFF",
+	"key.category.containerpeek.main": "Container Peek",
+	"key.containerpeek.toggle": "Toggle container labels",
+	"key.containerpeek.config": "Open Container Peek settings",
+	"containerpeek.config.title": "Container Peek Settings",
+	"containerpeek.config.enabled": "Mod enabled",
+	"containerpeek.config.show_names": "Show names",
+	"containerpeek.config.show_contents": "Show contents",
+	"containerpeek.config.show_unknown_hint": "\"Open once\" hint",
+	"containerpeek.config.max_icons": "Max icons",
+	"containerpeek.config.scale": "Size",
+	"containerpeek.config.y_offset": "Distance below crosshair",
+	"containerpeek.config.containers": "Containers...",
+	"containerpeek.config.containers_title": "Which containers to show",
+	"containerpeek.config.show_all": "Show all",
+	"containerpeek.config.hide_all": "Hide all",
+	"containerpeek.config.kind.other": "Other (modded)"
+}

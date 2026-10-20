@@ -1,4 +1,4 @@
-package com.greysworkshop.shulkernames;
+package com.greysworkshop.containerpeek;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -62,7 +62,7 @@ public final class NameStore {
 			})
 			.create();
 	private static final Type TYPE = new TypeToken<Map<String, Map<String, Map<Long, Entry>>>>() {}.getType();
-	private static final Path FILE = FabricLoader.getInstance().getConfigDir().resolve("shulkernames.json");
+	private static final Path FILE = FabricLoader.getInstance().getConfigDir().resolve("containerpeek.json");
 
 	private Map<String, Map<String, Map<Long, Entry>>> data = new HashMap<>();
 	private boolean dirty;
@@ -73,7 +73,7 @@ public final class NameStore {
 			Map<String, Map<String, Map<Long, Entry>>> loaded = GSON.fromJson(reader, TYPE);
 			if (loaded != null) data = loaded;
 		} catch (IOException | RuntimeException e) {
-			ShulkerNamesClient.LOGGER.error("Could not read {}", FILE, e);
+			ContainerPeekClient.LOGGER.error("Could not read {}", FILE, e);
 		}
 	}
 
@@ -83,7 +83,7 @@ public final class NameStore {
 		try (Writer writer = Files.newBufferedWriter(FILE)) {
 			GSON.toJson(data, TYPE, writer);
 		} catch (IOException e) {
-			ShulkerNamesClient.LOGGER.error("Could not write {}", FILE, e);
+			ContainerPeekClient.LOGGER.error("Could not write {}", FILE, e);
 		}
 	}
 

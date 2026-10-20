@@ -1,4 +1,4 @@
-package com.greysworkshop.shulkernames;
+package com.greysworkshop.containerpeek;
 
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
@@ -8,6 +8,7 @@ import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.ChestBlock;
@@ -44,13 +45,16 @@ import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-public class ShulkerNamesClient implements ClientModInitializer {
-	public static final String MOD_ID = "shulkernames";
+public class ContainerPeekClient implements ClientModInitializer {
+	public static final String MOD_ID = "containerpeek";
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
 	/** How long (in ticks) after a right-click we still accept the resulting screen or placement. */
@@ -79,14 +83,15 @@ public class ShulkerNamesClient implements ClientModInitializer {
 
 	@Override
 	public void onInitializeClient() {
+		migrateOldFiles();
 		ModConfig.load();
 		store.load();
 
 		KeyBinding.Category category = KeyBinding.Category.create(Identifier.of(MOD_ID, "main"));
 		toggleKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-				"key.shulkernames.toggle", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, category));
+				"key.containerpeek.toggle", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, category));
 		configKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-				"key.shulkernames.config", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, category));
+				"key.containerpeek.config", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, category));
 
 		UseBlockCallback.EVENT.register((player, world, hand, hit) -> {
 			if (!world.isClient() || !ModConfig.INSTANCE.enabled) return ActionResult.PASS;
@@ -147,6 +152,26 @@ public class ShulkerNamesClient implements ClientModInitializer {
 				Identifier.of(MOD_ID, "name_label"), this::renderHud);
 	}
 
+	/** Versions before 1.3.0 were called "Shulker Names"; carry their saved files over. */
+	private static void migrateOldFiles() {
+		Path dir = FabricLoader.getInstance().getConfigDir();
+		String[][] renames = {
+				{"shulkernames.json", "containerpeek.json"},
+				{"shulkernames-config.json", "containerpeek-config.json"},
+		};
+		for (String[] rename : renames) {
+			Path from = dir.resolve(rename[0]);
+			Path to = dir.resolve(rename[1]);
+			if (Files.exists(from) && !Files.exists(to)) {
+				try {
+					Files.move(from, to);
+				} catch (IOException e) {
+					LOGGER.error("Could not move {} to {}", from, to, e);
+				}
+			}
+		}
+	}
+
 	private void tick(MinecraftClient client) {
 		while (configKey.wasPressed()) {
 			client.setScreen(new ConfigScreen(client.currentScreen));
@@ -156,7 +181,7 @@ public class ShulkerNamesClient implements ClientModInitializer {
 			ModConfig.save();
 			if (client.player != null) {
 				client.player.sendMessage(Text.translatable(ModConfig.INSTANCE.enabled
-						? "shulkernames.toggled_on" : "shulkernames.toggled_off"), true);
+						? "containerpeek.toggled_on" : "containerpeek.toggled_off"), true);
 			}
 		}
 
@@ -226,7 +251,7 @@ public class ShulkerNamesClient implements ClientModInitializer {
 		if (entry == null) {
 			if (config.showUnknownHint) {
 				Text blockName = client.world.getBlockState(hit.getBlockPos()).getBlock().getName();
-				drawCentered(context, font, Text.translatable("shulkernames.unknown", blockName), y, 0xFFAAAAAA);
+				drawCentered(context, font, Text.translatable("containerpeek.unknown", blockName), y, 0xFFAAAAAA);
 			}
 			matrices.popMatrix();
 			return;
@@ -238,7 +263,7 @@ public class ShulkerNamesClient implements ClientModInitializer {
 
 		List<ItemStack> stacks = config.showContents ? entry.stacks(client.world.getRegistryManager()) : null;
 		if (stacks != null && stacks.isEmpty()) {
-			drawCentered(context, font, Text.translatable("shulkernames.empty"), y, 0xFFAAAAAA);
+			drawCentered(context, font, Text.translatable("containerpeek.empty"), y, 0xFFAAAAAA);
 		} else if (stacks != null) {
 			drawItemRow(context, font, stacks, y, config.maxIcons);
 		}

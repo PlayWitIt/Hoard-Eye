@@ -1,4 +1,4 @@
-package com.greysworkshop.shulkernames;
+package com.greysworkshop.containerpeek;
 
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
@@ -22,7 +22,7 @@ public class ConfigScreen extends Screen {
 	private int column;
 
 	public ConfigScreen(Screen parent) {
-		super(Text.translatable("shulkernames.config.title"));
+		super(Text.translatable("containerpeek.config.title"));
 		this.parent = parent;
 	}
 
@@ -33,14 +33,13 @@ public class ConfigScreen extends Screen {
 		column = 0;
 
 		toggle("enabled", () -> c.enabled, v -> c.enabled = v);
+		addDrawableChild(ButtonWidget.builder(Text.translatable("containerpeek.config.containers"),
+				b -> client.setScreen(new ContainersScreen(this)))
+				.dimensions(nextX(), nextY(), BUTTON_WIDTH, 20).build());
+		advance();
 		toggle("show_names", () -> c.showNames, v -> c.showNames = v);
 		toggle("show_contents", () -> c.showContents, v -> c.showContents = v);
 		toggle("show_unknown_hint", () -> c.showUnknownHint, v -> c.showUnknownHint = v);
-		toggle("shulker_boxes", () -> c.shulkerBoxes, v -> c.shulkerBoxes = v);
-		toggle("chests", () -> c.chests, v -> c.chests = v);
-		toggle("barrels", () -> c.barrels, v -> c.barrels = v);
-		toggle("ender_chest", () -> c.enderChest, v -> c.enderChest = v);
-		toggle("other_containers", () -> c.otherContainers, v -> c.otherContainers = v);
 		slider("max_icons", "", 1, 27, () -> c.maxIcons, v -> c.maxIcons = v);
 		slider("scale", "%", 50, 200, () -> c.scalePercent, v -> c.scalePercent = v);
 		slider("y_offset", "", 0, 100, () -> c.yOffset, v -> c.yOffset = v);
@@ -65,7 +64,7 @@ public class ConfigScreen extends Screen {
 	}
 
 	private void toggle(String key, BooleanSupplier getter, Consumer<Boolean> setter) {
-		Text label = Text.translatable("shulkernames.config." + key);
+		Text label = Text.translatable("containerpeek.config." + key);
 		addDrawableChild(ButtonWidget.builder(ScreenTexts.composeToggleText(label, getter.getAsBoolean()), b -> {
 			setter.accept(!getter.getAsBoolean());
 			b.setMessage(ScreenTexts.composeToggleText(label, getter.getAsBoolean()));
@@ -74,7 +73,7 @@ public class ConfigScreen extends Screen {
 	}
 
 	private void slider(String key, String suffix, int min, int max, IntSupplier getter, IntConsumer setter) {
-		Text label = Text.translatable("shulkernames.config." + key);
+		Text label = Text.translatable("containerpeek.config." + key);
 		double start = (getter.getAsInt() - min) / (double) (max - min);
 		SliderWidget slider = new SliderWidget(nextX(), nextY(), BUTTON_WIDTH, 20, Text.empty(), start) {
 			{

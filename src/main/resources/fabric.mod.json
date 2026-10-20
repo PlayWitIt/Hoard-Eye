@@ -1,8 +1,8 @@
 {
 	"schemaVersion": 1,
-	"id": "shulkernames",
+	"id": "containerpeek",
 	"version": "${version}",
-	"name": "Shulker Names",
+	"name": "Container Peek",
 	"description": "Shows the name and contents of shulker boxes, chests, barrels and other containers next to your crosshair. Client-side only: learns them when you open or place containers.",
 	"authors": [
 		"greysworkshop"
@@ -11,10 +11,10 @@
 	"environment": "client",
 	"entrypoints": {
 		"client": [
-			"com.greysworkshop.shulkernames.ShulkerNamesClient"
+			"com.greysworkshop.containerpeek.ContainerPeekClient"
 		],
 		"modmenu": [
-			"com.greysworkshop.shulkernames.ModMenuIntegration"
+			"com.greysworkshop.containerpeek.ModMenuIntegration"
 		]
 	},
 	"depends": {

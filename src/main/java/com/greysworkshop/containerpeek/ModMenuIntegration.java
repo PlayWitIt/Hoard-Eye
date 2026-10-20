@@ -1,4 +1,4 @@
-package com.greysworkshop.shulkernames;
+package com.greysworkshop.containerpeek;
 
 import com.terraformersmc.modmenu.api.ConfigScreenFactory;
 import com.terraformersmc.modmenu.api.ModMenuApi;
