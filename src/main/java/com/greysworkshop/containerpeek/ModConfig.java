@@ -53,6 +53,8 @@ public final class ModConfig {
 	public boolean hideWhileSneaking = false;
 
 	// Search and locator.
+	/** On-screen markers over located containers, visible through walls. */
+	public boolean locatorMarkers = true;
 	public boolean locatorBeam = true;
 	public int beamHeight = 96;
 	/** How close you have to get for a located container to count as found. */

@@ -73,6 +73,7 @@ public class ConfigScreen extends OptionsScreen {
 				new Tab("search", r -> {
 					r.note(Text.translatable(P + ".search_note"));
 					r.header("header.locator");
+					r.toggle("locator_markers", () -> c.locatorMarkers, v -> c.locatorMarkers = v);
 					r.toggle("locator_beam", () -> c.locatorBeam, v -> c.locatorBeam = v);
 					r.slider("beam_height", 16, 256, () -> c.beamHeight, v -> c.beamHeight = v / 8 * 8,
 							v -> Text.translatable(P + ".blocks", v / 8 * 8).getString());

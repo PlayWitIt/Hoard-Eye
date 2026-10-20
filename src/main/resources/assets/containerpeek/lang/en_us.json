@@ -136,7 +136,7 @@
 	"containerpeek.config.kind.desc": "Show the label when looking at a %s.",
 	"containerpeek.config.search_note": "Open Storage Search with Y (change it in Options → Controls → Key Binds → Container Peek). Click a result to have the locator walk you there.",
 	"containerpeek.config.locator_beam": "Beam",
-	"containerpeek.config.locator_beam.desc": "A tall line above each container you're being guided to, visible from far away.",
+	"containerpeek.config.locator_beam.desc": "A tall line above each container you're being guided to. It's hidden by walls like normal blocks; the waypoint markers aren't.",
 	"containerpeek.config.beam_height": "Beam height",
 	"containerpeek.config.beam_height.desc": "How tall the beam is.",
 	"containerpeek.config.locator_reach": "Found within",
@@ -158,5 +158,7 @@
 	"containerpeek.config.forget_all.confirm": "Forget every container on every server and world? This can't be undone.",
 	"containerpeek.config.open_folder": "Data folder",
 	"containerpeek.config.open_folder.desc": "Open the folder with Container Peek's files.",
-	"containerpeek.config.open_folder.button": "Open folder"
+	"containerpeek.config.open_folder.button": "Open folder",
+	"containerpeek.config.locator_markers": "Waypoint markers",
+	"containerpeek.config.locator_markers.desc": "Show each container you're looking for as an icon with its distance on screen, visible through walls. When it's behind you or off-screen, the marker sits at the edge with an arrow pointing the way."
 }

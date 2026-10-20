@@ -148,6 +148,18 @@ public final class SelfTest {
 				client.getServer().execute(() -> client.getServer().getPlayerManager().getPlayerList().get(0)
 						.requestTeleport(origin.getX() - 14, origin.getY(), origin.getZ() - 14));
 			}
+			case 340 -> {
+				log("Walling the player in so the containers are out of sight");
+				BlockPos me = origin.add(-14, 0, -14);
+				server(client, w -> {
+					for (int dx = -3; dx <= 3; dx++) {
+						for (int dz = -3; dz <= 3; dz++) {
+							if (Math.abs(dx) != 3 && Math.abs(dz) != 3) continue;
+							for (int dy = 0; dy <= 3; dy++) w.setBlockState(me.add(dx, dy, dz), Blocks.STONE.getDefaultState());
+						}
+					}
+				});
+			}
 			case 358 -> {
 				log("Player is " + (int) Math.sqrt(client.player.squaredDistanceTo(Vec3d.ofCenter(origin))) + " blocks from the containers");
 				if (client.currentScreen instanceof SearchScreen s) s.testHighlightAll();
@@ -157,7 +169,15 @@ public final class SelfTest {
 				check("locator guiding to 4 diamond containers (" + Locator.count() + ")", Locator.count() == 4);
 				aimAt(client, origin.add(1, 0, 1));
 			}
-			case 372 -> screenshot(client, "6_locator");
+			case 372 -> {
+				log("Marker: " + Locator.lastMarker);
+				screenshot(client, "6_locator_through_wall");
+			}
+			case 374 -> aimAt(client, origin.add(-40, 0, -40));
+			case 379 -> {
+				log("Marker after turning away: " + Locator.lastMarker);
+				screenshot(client, "6b_locator_behind_you");
+			}
 			case 380 -> {
 				Locator.stop();
 				ModConfig.INSTANCE.labelBackground = true;
