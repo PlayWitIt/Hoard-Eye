@@ -2,25 +2,35 @@ package com.greysworkshop.shulkernames;
 
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.minecraft.block.Block;
-import net.minecraft.block.ShulkerBoxBlock;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.ChestBlock;
+import net.minecraft.block.DoubleBlockProperties;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.ingame.ShulkerBoxScreen;
+import net.minecraft.client.gui.screen.ingame.CreativeInventoryScreen;
+import net.minecraft.client.gui.screen.ingame.HandledScreen;
+import net.minecraft.client.gui.screen.ingame.InventoryScreen;
 import net.minecraft.client.network.ServerInfo;
+import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.render.RenderTickCounter;
+import net.minecraft.client.util.InputUtil;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.ContainerComponent;
+import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.inventory.CraftingResultInventory;
 import net.minecraft.item.ItemPlacementContext;
 import net.minecraft.item.ItemStack;
-import net.minecraft.screen.ShulkerBoxScreenHandler;
+import net.minecraft.screen.ScreenHandler;
+import net.minecraft.screen.slot.Slot;
 import net.minecraft.text.Text;
 import net.minecraft.text.TranslatableTextContent;
 import net.minecraft.util.ActionResult;
@@ -29,6 +39,8 @@ import net.minecraft.util.collection.DefaultedList;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
+import org.joml.Matrix3x2fStack;
+import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,15 +55,23 @@ public class ShulkerNamesClient implements ClientModInitializer {
 
 	/** How long (in ticks) after a right-click we still accept the resulting screen or placement. */
 	private static final int PENDING_TICKS = 40;
+	/** Slot count of a shulker box item's contents. */
 	private static final int BOX_SLOTS = 27;
-	/** Most distinct item types drawn in the HUD row before showing "+N". */
-	private static final int MAX_ICONS = 9;
+	/** Ender chest contents are the same everywhere, so they're stored under one fixed key. */
+	private static final String ENDER_DIMENSION = "#ender";
+
+	/** Where a container's data is stored: a dimension key plus a position within it. */
+	private record Target(ContainerKind kind, String dimension, BlockPos pos) {}
 
 	private final NameStore store = new NameStore();
 
-	private BlockPos pendingOpen;
+	private KeyBinding toggleKey;
+	private KeyBinding configKey;
+
+	private Target pendingOpen;
 	private int pendingOpenTicks;
 	private BlockPos pendingPlace;
+	private Block pendingPlaceBlock;
 	private String pendingPlaceName;
 	private List<ItemStack> pendingPlaceItems;
 	private int pendingPlaceTicks;
@@ -59,24 +79,35 @@ public class ShulkerNamesClient implements ClientModInitializer {
 
 	@Override
 	public void onInitializeClient() {
+		ModConfig.load();
 		store.load();
 
-		UseBlockCallback.EVENT.register((player, world, hand, hit) -> {
-			if (!world.isClient()) return ActionResult.PASS;
+		KeyBinding.Category category = KeyBinding.Category.create(Identifier.of(MOD_ID, "main"));
+		toggleKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+				"key.shulkernames.toggle", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, category));
+		configKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+				"key.shulkernames.config", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, category));
 
-			// Right-clicking a shulker box might open it; remember where, so we can match the screen.
-			if (world.getBlockState(hit.getBlockPos()).getBlock() instanceof ShulkerBoxBlock) {
-				pendingOpen = hit.getBlockPos();
+		UseBlockCallback.EVENT.register((player, world, hand, hit) -> {
+			if (!world.isClient() || !ModConfig.INSTANCE.enabled) return ActionResult.PASS;
+			ClientWorld clientWorld = (ClientWorld) world;
+
+			// Right-clicking a container might open it; remember which, so we can match the screen.
+			Target target = resolve(clientWorld, hit.getBlockPos());
+			if (target != null) {
+				pendingOpen = target;
 				pendingOpenTicks = PENDING_TICKS;
 			}
 
-			// Right-clicking with a shulker box item might place it; remember where and what it holds.
+			// Right-clicking with a block item might place a container; remember where and what it holds.
 			ItemStack stack = player.getStackInHand(hand);
-			if (Block.getBlockFromItem(stack.getItem()) instanceof ShulkerBoxBlock) {
+			Block block = Block.getBlockFromItem(stack.getItem());
+			if (block != null && block.getDefaultState().hasBlockEntity()) {
 				Text name = stack.get(DataComponentTypes.CUSTOM_NAME);
 				DefaultedList<ItemStack> items = DefaultedList.ofSize(BOX_SLOTS, ItemStack.EMPTY);
 				stack.getOrDefault(DataComponentTypes.CONTAINER, ContainerComponent.DEFAULT).copyTo(items);
 				pendingPlace = new ItemPlacementContext(player, hand, stack, hit).getBlockPos();
+				pendingPlaceBlock = block;
 				pendingPlaceName = name == null ? "" : name.getString();
 				pendingPlaceItems = items;
 				pendingPlaceTicks = PENDING_TICKS;
@@ -85,25 +116,21 @@ public class ShulkerNamesClient implements ClientModInitializer {
 		});
 
 		ScreenEvents.AFTER_INIT.register((client, screen, width, height) -> {
-			if (!(screen instanceof ShulkerBoxScreen boxScreen) || pendingOpen == null) return;
+			if (!(screen instanceof HandledScreen<?> handled) || pendingOpen == null) return;
+			if (screen instanceof InventoryScreen || screen instanceof CreativeInventoryScreen) return;
 			String world = worldKey(client);
 			if (world == null || client.world == null) return;
-			String dimension = dimensionKey(client.world);
-			BlockPos pos = pendingOpen;
+			Target target = pendingOpen;
 			String name = titleToName(screen.getTitle());
 			pendingOpen = null;
-			store.put(world, dimension, pos, name, null, client.world.getRegistryManager());
+			store.put(world, target.dimension(), target.pos(), name, null, client.world.getRegistryManager());
 			store.saveIfDirty();
 
 			// Slots fill in after the screen opens, so read the contents when it closes.
 			ScreenEvents.remove(screen).register(closed -> {
 				if (client.world == null || !world.equals(worldKey(client))) return;
-				ShulkerBoxScreenHandler handler = boxScreen.getScreenHandler();
-				List<ItemStack> items = new ArrayList<>();
-				for (int i = 0; i < BOX_SLOTS; i++) {
-					items.add(handler.getSlot(i).getStack().copy());
-				}
-				store.put(world, dimension, pos, name, items, client.world.getRegistryManager());
+				List<ItemStack> items = containerStacks(handled.getScreenHandler());
+				store.put(world, target.dimension(), target.pos(), name, items, client.world.getRegistryManager());
 				store.saveIfDirty();
 			});
 		});
@@ -121,7 +148,19 @@ public class ShulkerNamesClient implements ClientModInitializer {
 	}
 
 	private void tick(MinecraftClient client) {
-		if (client.world == null) return;
+		while (configKey.wasPressed()) {
+			client.setScreen(new ConfigScreen(client.currentScreen));
+		}
+		while (toggleKey.wasPressed()) {
+			ModConfig.INSTANCE.enabled = !ModConfig.INSTANCE.enabled;
+			ModConfig.save();
+			if (client.player != null) {
+				client.player.sendMessage(Text.translatable(ModConfig.INSTANCE.enabled
+						? "shulkernames.toggled_on" : "shulkernames.toggled_off"), true);
+			}
+		}
+
+		if (client.world == null || !ModConfig.INSTANCE.enabled) return;
 		String world = worldKey(client);
 		if (world == null) return;
 		String dimension = dimensionKey(client.world);
@@ -129,17 +168,24 @@ public class ShulkerNamesClient implements ClientModInitializer {
 		if (pendingOpen != null && --pendingOpenTicks <= 0) pendingOpen = null;
 
 		if (pendingPlace != null) {
-			if (client.world.getBlockState(pendingPlace).getBlock() instanceof ShulkerBoxBlock) {
-				store.put(world, dimension, pendingPlace, pendingPlaceName, pendingPlaceItems,
-						client.world.getRegistryManager());
+			BlockState state = client.world.getBlockState(pendingPlace);
+			Target target = state.isOf(pendingPlaceBlock) ? resolve(client.world, pendingPlace) : null;
+			if (target != null) {
+				// A chest that joined another into a double chest keeps the other half's contents, so skip it.
+				boolean joinedDouble = state.getBlock() instanceof ChestBlock
+						&& ChestBlock.getDoubleBlockType(state) != DoubleBlockProperties.Type.SINGLE;
+				if (target.kind() != ContainerKind.ENDER_CHEST && !joinedDouble) {
+					store.put(world, target.dimension(), target.pos(), pendingPlaceName, pendingPlaceItems,
+							client.world.getRegistryManager());
+					store.saveIfDirty();
+				}
 				pendingPlace = null;
-				store.saveIfDirty();
 			} else if (--pendingPlaceTicks <= 0) {
 				pendingPlace = null;
 			}
 		}
 
-		// Once a second, forget boxes that are gone (broken or picked up) in loaded chunks.
+		// Once a second, forget containers that are gone (broken or picked up) in loaded chunks.
 		if (++cleanupTimer >= 20) {
 			cleanupTimer = 0;
 			Map<Long, NameStore.Entry> entries = store.dimension(world, dimension);
@@ -148,7 +194,7 @@ public class ShulkerNamesClient implements ClientModInitializer {
 				BlockPos pos = BlockPos.fromLong(it.next().getKey());
 				if (pos.equals(pendingPlace)) continue;
 				if (!client.world.isChunkLoaded(pos.getX() >> 4, pos.getZ() >> 4)) continue;
-				if (!(client.world.getBlockState(pos).getBlock() instanceof ShulkerBoxBlock)) {
+				if (resolve(client.world, pos) == null) {
 					it.remove();
 					store.markDirty();
 				}
@@ -158,36 +204,49 @@ public class ShulkerNamesClient implements ClientModInitializer {
 	}
 
 	private void renderHud(DrawContext context, RenderTickCounter tickCounter) {
+		ModConfig config = ModConfig.INSTANCE;
 		MinecraftClient client = MinecraftClient.getInstance();
-		if (client.world == null || client.options.hudHidden || client.currentScreen != null) return;
+		if (!config.enabled || client.world == null || client.options.hudHidden || client.currentScreen != null) return;
 		if (!(client.crosshairTarget instanceof BlockHitResult hit) || hit.getType() != HitResult.Type.BLOCK) return;
-		BlockPos pos = hit.getBlockPos();
-		if (!(client.world.getBlockState(pos).getBlock() instanceof ShulkerBoxBlock)) return;
+		Target target = resolve(client.world, hit.getBlockPos());
+		if (target == null || !config.isShown(target.kind())) return;
 		String world = worldKey(client);
 		if (world == null) return;
 
 		TextRenderer font = client.textRenderer;
-		int centerX = context.getScaledWindowWidth() / 2;
-		int y = context.getScaledWindowHeight() / 2 + 10;
+		Matrix3x2fStack matrices = context.getMatrices();
+		matrices.pushMatrix();
+		matrices.translate(context.getScaledWindowWidth() / 2f, context.getScaledWindowHeight() / 2f + config.yOffset);
+		float scale = config.scalePercent / 100f;
+		matrices.scale(scale, scale);
+		// From here on, (0, 0) is the top centre of the label.
+		int y = 0;
 
-		NameStore.Entry entry = store.get(world, dimensionKey(client.world), pos);
+		NameStore.Entry entry = store.get(world, target.dimension(), target.pos());
 		if (entry == null) {
-			drawCentered(context, font, Text.translatable("shulkernames.unknown"), centerX, y, 0xFFAAAAAA);
+			if (config.showUnknownHint) {
+				Text blockName = client.world.getBlockState(hit.getBlockPos()).getBlock().getName();
+				drawCentered(context, font, Text.translatable("shulkernames.unknown", blockName), y, 0xFFAAAAAA);
+			}
+			matrices.popMatrix();
 			return;
 		}
-		if (!entry.name.isEmpty()) {
-			drawCentered(context, font, Text.literal(entry.name), centerX, y, 0xFFFFFFFF);
+		if (config.showNames && !entry.name.isEmpty()) {
+			drawCentered(context, font, Text.literal(entry.name), y, 0xFFFFFFFF);
 			y += 11;
 		}
 
-		List<ItemStack> stacks = entry.stacks(client.world.getRegistryManager());
-		if (stacks == null) return;
-		if (stacks.isEmpty()) {
-			drawCentered(context, font, Text.translatable("shulkernames.empty"), centerX, y, 0xFFAAAAAA);
-			return;
+		List<ItemStack> stacks = config.showContents ? entry.stacks(client.world.getRegistryManager()) : null;
+		if (stacks != null && stacks.isEmpty()) {
+			drawCentered(context, font, Text.translatable("shulkernames.empty"), y, 0xFFAAAAAA);
+		} else if (stacks != null) {
+			drawItemRow(context, font, stacks, y, config.maxIcons);
 		}
+		matrices.popMatrix();
+	}
 
-		// Combine identical items so a box of 27 stacks of cobblestone shows one icon with "1728".
+	/** Draws the contents as icons, combining identical items so 27 stacks of cobblestone show "1728". */
+	private static void drawItemRow(DrawContext context, TextRenderer font, List<ItemStack> stacks, int y, int maxIcons) {
 		List<ItemStack> groups = new ArrayList<>();
 		List<Integer> totals = new ArrayList<>();
 		outer:
@@ -202,11 +261,11 @@ public class ShulkerNamesClient implements ClientModInitializer {
 			totals.add(stack.getCount());
 		}
 
-		int shown = Math.min(groups.size(), MAX_ICONS);
+		int shown = Math.min(groups.size(), maxIcons);
 		int extra = groups.size() - shown;
 		String more = extra > 0 ? "+" + extra : null;
 		int rowWidth = shown * 18 + (more != null ? font.getWidth(more) + 2 : 0);
-		int x = centerX - rowWidth / 2;
+		int x = -rowWidth / 2;
 		for (int i = 0; i < shown; i++) {
 			ItemStack stack = groups.get(i);
 			int total = totals.get(i);
@@ -219,13 +278,41 @@ public class ShulkerNamesClient implements ClientModInitializer {
 		}
 	}
 
-	private static void drawCentered(DrawContext context, TextRenderer font, Text text, int centerX, int y, int color) {
-		context.drawTextWithShadow(font, text, centerX - font.getWidth(text) / 2, y, color);
+	private static void drawCentered(DrawContext context, TextRenderer font, Text text, int y, int color) {
+		context.drawTextWithShadow(font, text, -font.getWidth(text) / 2, y, color);
 	}
 
-	/** An unnamed box's screen uses the default "Shulker Box" title; anything else is a custom name. */
+	/**
+	 * Works out where the container at {@code pos} is stored, or returns null if it isn't a container.
+	 * Both halves of a double chest share one entry, and all ender chests share one entry.
+	 */
+	private static Target resolve(ClientWorld world, BlockPos pos) {
+		ContainerKind kind = ContainerKind.of(world.getBlockEntity(pos));
+		if (kind == null) return null;
+		if (kind == ContainerKind.ENDER_CHEST) return new Target(kind, ENDER_DIMENSION, BlockPos.ORIGIN);
+
+		BlockState state = world.getBlockState(pos);
+		if (state.getBlock() instanceof ChestBlock && ChestBlock.getDoubleBlockType(state) != DoubleBlockProperties.Type.SINGLE) {
+			BlockPos other = pos.offset(ChestBlock.getFacing(state));
+			if (other.asLong() < pos.asLong()) pos = other;
+		}
+		return new Target(kind, dimensionKey(world), pos.toImmutable());
+	}
+
+	/** The container's own slots from an open screen, leaving out the player's inventory and crafter output. */
+	private static List<ItemStack> containerStacks(ScreenHandler handler) {
+		List<ItemStack> items = new ArrayList<>();
+		for (Slot slot : handler.slots) {
+			if (slot.inventory instanceof PlayerInventory || slot.inventory instanceof CraftingResultInventory) continue;
+			items.add(slot.getStack().copy());
+		}
+		return items;
+	}
+
+	/** A default title (like "Chest" or "Furnace") means the container is unnamed; anything else is a custom name. */
 	private static String titleToName(Text title) {
-		if (title.getContent() instanceof TranslatableTextContent t && t.getKey().equals("container.shulkerBox")) {
+		if (title.getContent() instanceof TranslatableTextContent t
+				&& (t.getKey().startsWith("container.") || t.getKey().startsWith("block."))) {
 			return "";
 		}
 		return title.getString();
