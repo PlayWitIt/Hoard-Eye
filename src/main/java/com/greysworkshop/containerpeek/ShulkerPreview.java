@@ -30,6 +30,7 @@ public final class ShulkerPreview {
 	public static boolean applies(ItemStack stack) {
 		ModConfig config = ModConfig.INSTANCE;
 		if (!config.enabled || !config.shulkerTooltip) return false;
+		if (config.shulkerTooltipShiftOnly && !net.minecraft.client.MinecraftClient.getInstance().isShiftPressed()) return false;
 		if (!(Block.getBlockFromItem(stack.getItem()) instanceof ShulkerBoxBlock)) return false;
 		ContainerComponent contents = stack.get(DataComponentTypes.CONTAINER);
 		return contents != null && contents.streamNonEmpty().findAny().isPresent();

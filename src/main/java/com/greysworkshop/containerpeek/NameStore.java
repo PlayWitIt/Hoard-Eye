@@ -127,6 +127,17 @@ public final class NameStore {
 		return data.computeIfAbsent(world, k -> new HashMap<>()).computeIfAbsent(dimension, k -> new HashMap<>());
 	}
 
+	/** Forgets every container in one server/world. */
+	public void clearWorld(String world) {
+		if (data.remove(world) != null) dirty = true;
+	}
+
+	/** Forgets every container everywhere. */
+	public void clearAll() {
+		data.clear();
+		dirty = true;
+	}
+
 	public void markDirty() {
 		dirty = true;
 	}

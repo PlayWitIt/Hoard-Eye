@@ -819,4 +819,24 @@ public class SearchScreen extends Screen {
 	public boolean shouldPause() {
 		return false;
 	}
+
+	// ---- Hooks for the development self-test ----
+
+	public void testQuery(String query) {
+		search.setText(query);
+	}
+
+	public void testView(boolean containers) {
+		view = containers ? View.CONTAINERS : View.ITEMS;
+		clearAndInit();
+	}
+
+	/** Total count of the item with this display name in the current results, or -1 if absent. */
+	public int testTotal(String name) {
+		return groups.stream().filter(g -> g.name.equals(name)).mapToInt(g -> g.total).findFirst().orElse(-1);
+	}
+
+	public void testHighlightAll() {
+		highlightAll();
+	}
 }

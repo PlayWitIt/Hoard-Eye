@@ -104,7 +104,7 @@ public class ContainerPeekClient implements ClientModInitializer {
 				"key.containerpeek.search", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_Y, category));
 
 		UseBlockCallback.EVENT.register((player, world, hand, hit) -> {
-			if (!world.isClient() || !ModConfig.INSTANCE.enabled) return ActionResult.PASS;
+			if (!world.isClient() || !ModConfig.INSTANCE.enabled || !ModConfig.INSTANCE.rememberContainers) return ActionResult.PASS;
 			ClientWorld clientWorld = (ClientWorld) world;
 
 			// Right-clicking a container might open it; remember which, so we can match the screen.
@@ -167,6 +167,15 @@ public class ContainerPeekClient implements ClientModInitializer {
 				Identifier.of(MOD_ID, "name_label"), this::renderHud);
 		HudElementRegistry.addLast(Identifier.of(MOD_ID, "locator"), Locator::renderHud);
 		WorldRenderEvents.BEFORE_DEBUG_RENDER.register(Locator::renderWorld);
+
+		// Scripted development test (./gradlew runSelfTest); the class isn't shipped in the release jar.
+		if (Boolean.getBoolean("containerpeek.selftest")) {
+			try {
+				Class.forName("com.greysworkshop.containerpeek.SelfTest").getMethod("start").invoke(null);
+			} catch (ReflectiveOperationException e) {
+				LOGGER.error("Self-test not available", e);
+			}
+		}
 	}
 
 	public NameStore store() {
@@ -236,7 +245,7 @@ public class ContainerPeekClient implements ClientModInitializer {
 		}
 
 		// Once a second, forget containers that are gone (broken or picked up) in loaded chunks.
-		if (++cleanupTimer >= 20) {
+		if (ModConfig.INSTANCE.forgetBroken && ++cleanupTimer >= 20) {
 			cleanupTimer = 0;
 			Map<Long, NameStore.Entry> entries = store.dimension(world, dimension);
 			Iterator<Map.Entry<Long, NameStore.Entry>> it = entries.entrySet().iterator();
@@ -260,6 +269,8 @@ public class ContainerPeekClient implements ClientModInitializer {
 		if (!(client.crosshairTarget instanceof BlockHitResult hit) || hit.getType() != HitResult.Type.BLOCK) return;
 		Target target = resolve(client.world, hit.getBlockPos());
 		if (target == null || !config.isShown(target.kind())) return;
+		if (config.hideWhileSneaking && client.player.isSneaking()) return;
+		if (client.player.getEyePos().distanceTo(hit.getBlockPos().toCenterPos()) > config.maxDistance) return;
 		String world = worldKey(client);
 		if (world == null) return;
 
@@ -275,10 +286,13 @@ public class ContainerPeekClient implements ClientModInitializer {
 			line = Text.translatable("containerpeek.unknown", blockName);
 			lineColor = 0xFFAAAAAA;
 		} else {
-			if (config.showNames && !entry.name.isEmpty()) line = Text.literal(entry.name);
+			if (config.showNames && !entry.name.isEmpty()) {
+				line = Text.literal(entry.name);
+				lineColor = 0xFF000000 | config.nameColor.rgb;
+			}
 			List<ItemStack> stacks = config.showContents ? entry.stacks(client.world.getRegistryManager()) : null;
 			if (stacks != null && !stacks.isEmpty()) {
-				grid = ItemGrid.of(stacks, config.maxIcons, Math.max(1, config.iconsPerRow), font);
+				grid = ItemGrid.of(stacks, config.maxIcons, Math.max(1, config.iconsPerRow), config.showMoreCount, font);
 			} else if (stacks != null && line == null) {
 				line = Text.translatable("containerpeek.empty");
 				lineColor = 0xFFAAAAAA;
@@ -320,6 +334,10 @@ public class ContainerPeekClient implements ClientModInitializer {
 		matrices.pushMatrix();
 		matrices.translate(Math.round(x), Math.round(y));
 		matrices.scale(scale, scale);
+		if (config.labelBackground) {
+			int alpha = Math.round(config.backgroundOpacity * 2.55f) << 24;
+			context.fill(-4, -4, width + 4, height + 4, alpha | 0x101018);
+		}
 		int lineY = 0;
 		if (line != null) {
 			context.drawTextWithShadow(font, line, position.align(width, lineWidth), lineY, lineColor);
@@ -336,9 +354,10 @@ public class ContainerPeekClient implements ClientModInitializer {
 	 * Wraps after {@code perRow} icons; a "+N" for anything past {@code maxIcons} goes at the end of the last row.
 	 */
 	private record ItemGrid(List<ItemStack> groups, List<Integer> totals, int perRow, String more, int moreWidth) {
-		private static final int CELL = 18;
+		/** A little wider than an item, so 3-digit counts don't run into their neighbours. */
+		private static final int CELL = 20;
 
-		static ItemGrid of(List<ItemStack> stacks, int maxIcons, int perRow, TextRenderer font) {
+		static ItemGrid of(List<ItemStack> stacks, int maxIcons, int perRow, boolean showMore, TextRenderer font) {
 			List<ItemStack> groups = new ArrayList<>();
 			List<Integer> totals = new ArrayList<>();
 			outer:
@@ -355,13 +374,20 @@ public class ContainerPeekClient implements ClientModInitializer {
 
 			int shown = Math.min(groups.size(), maxIcons);
 			int extra = groups.size() - shown;
-			String more = extra > 0 ? "+" + extra : null;
+			String more = extra > 0 && showMore ? "+" + extra : null;
 			int moreWidth = more != null ? font.getWidth(more) + 2 : 0;
 			return new ItemGrid(groups.subList(0, shown), totals.subList(0, shown), perRow, more, moreWidth);
 		}
 
 		int rows() {
 			return (groups.size() + perRow - 1) / perRow;
+		}
+
+		/** "64", "999", "1.7k", "17k": short enough to stay under its icon. */
+		static String count(int total) {
+			if (total < 1000 || ModConfig.INSTANCE.countFormat == ModConfig.CountFormat.EXACT) return String.valueOf(total);
+			if (total < 10_000) return String.format(java.util.Locale.ROOT, "%.1fk", total / 1000.0);
+			return total / 1000 + "k";
 		}
 
 		int rowWidth(int row) {
@@ -387,7 +413,7 @@ public class ContainerPeekClient implements ClientModInitializer {
 					ItemStack stack = groups.get(i);
 					int total = totals.get(i);
 					context.drawItem(stack, x, y);
-					context.drawStackOverlay(font, stack, x, y, total > 1 ? String.valueOf(total) : null);
+					context.drawStackOverlay(font, stack, x, y, total > 1 ? count(total) : null);
 					x += CELL;
 				}
 				if (row == rows() - 1 && more != null) {

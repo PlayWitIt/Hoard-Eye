@@ -8,8 +8,10 @@ import net.minecraft.client.render.RenderLayers;
 import net.minecraft.client.render.RenderTickCounter;
 import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.render.VertexRendering;
+import net.minecraft.client.sound.PositionedSoundInstance;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.item.ItemStack;
+import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.MathHelper;
@@ -27,10 +29,8 @@ import java.util.List;
 public final class Locator {
 	public record Target(String dimension, BlockPos pos, String label, ItemStack icon) {}
 
-	private static final double REACHED = 3.5;
 	private static final int COLOR = 0xFF40E0FF;
 	private static final VoxelShape BOX = VoxelShapes.cuboid(-0.02, -0.02, -0.02, 1.02, 1.02, 1.02);
-	private static final VoxelShape BEAM = VoxelShapes.cuboid(0.4, 1.02, 0.4, 0.6, 96, 0.6);
 	private static final String[] ARROWS = {"↑", "↗", "→", "↘", "↓", "↙", "←", "↖"};
 
 	private static final List<Target> targets = new ArrayList<>();
@@ -62,9 +62,14 @@ public final class Locator {
 	public static void tick(MinecraftClient client) {
 		if (targets.isEmpty() || client.player == null || client.world == null) return;
 		String dimension = ContainerPeekClient.dimensionKey(client.world);
+		double reach = ModConfig.INSTANCE.locatorReach + 0.5;
 		boolean removed = targets.removeIf(t -> t.dimension.equals(dimension)
-				&& client.player.getEyePos().distanceTo(Vec3d.ofCenter(t.pos)) <= REACHED);
-		if (removed && targets.isEmpty()) foundUntil = System.currentTimeMillis() + 3000;
+				&& client.player.getEyePos().distanceTo(Vec3d.ofCenter(t.pos)) <= reach);
+		if (!removed) return;
+		if (targets.isEmpty()) foundUntil = System.currentTimeMillis() + 3000;
+		if (ModConfig.INSTANCE.foundSound) {
+			client.getSoundManager().play(PositionedSoundInstance.ui(SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP, targets.isEmpty() ? 1.0f : 1.5f));
+		}
 	}
 
 	private static Target nearest(MinecraftClient client) {
@@ -87,7 +92,7 @@ public final class Locator {
 		if (client.player == null || client.world == null || client.options.hudHidden) return;
 		TextRenderer font = client.textRenderer;
 		int centerX = context.getScaledWindowWidth() / 2;
-		int y = 6;
+		int y = ModConfig.INSTANCE.stripPosition == ModConfig.StripPosition.TOP ? 6 : context.getScaledWindowHeight() - 62;
 
 		if (targets.isEmpty()) {
 			if (System.currentTimeMillis() < foundUntil) {
@@ -139,11 +144,12 @@ public final class Locator {
 		Vec3d camera = client.gameRenderer.getCamera().getCameraPos();
 		MatrixStack matrices = context.matrices();
 		VertexConsumer lines = context.consumers().getBuffer(RenderLayers.lines());
+		VoxelShape beam = VoxelShapes.cuboid(0.4, 1.02, 0.4, 0.6, ModConfig.INSTANCE.beamHeight, 0.6);
 		for (Target target : targets) {
 			if (!target.dimension.equals(dimension)) continue;
 			double x = target.pos.getX() - camera.x, y = target.pos.getY() - camera.y, z = target.pos.getZ() - camera.z;
 			VertexRendering.drawOutline(matrices, lines, BOX, x, y, z, COLOR, 3.0f);
-			VertexRendering.drawOutline(matrices, lines, BEAM, x, y, z, COLOR, 2.0f);
+			if (ModConfig.INSTANCE.locatorBeam) VertexRendering.drawOutline(matrices, lines, beam, x, y, z, COLOR, 2.0f);
 		}
 	}
 }

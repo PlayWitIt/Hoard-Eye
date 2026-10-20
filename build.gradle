@@ -37,3 +37,19 @@ java {
 	sourceCompatibility = JavaVersion.VERSION_21
 	targetCompatibility = JavaVersion.VERSION_21
 }
+
+// The scripted self-test is for development only.
+jar {
+	exclude 'com/greysworkshop/containerpeek/SelfTest*'
+}
+
+loom {
+	runs {
+		selfTest {
+			client()
+			name = "Self Test"
+			vmArgs "-Dcontainerpeek.selftest=true", "-Xmx1536m"
+			runDir "run"
+		}
+	}
+}
