@@ -165,7 +165,8 @@ public class ContainerPeekClient implements ClientModInitializer {
 
 		HudElementRegistry.attachElementAfter(VanillaHudElements.CROSSHAIR,
 				Identifier.of(MOD_ID, "name_label"), this::renderHud);
-		HudElementRegistry.addLast(Identifier.of(MOD_ID, "locator"), Locator::renderHud);
+		// After chat, so markers aren't hidden behind recent messages.
+		HudElementRegistry.attachElementAfter(VanillaHudElements.CHAT, Identifier.of(MOD_ID, "locator"), Locator::renderHud);
 		WorldRenderEvents.BEFORE_DEBUG_RENDER.register(Locator::renderWorld);
 
 		// Scripted development test (./gradlew runSelfTest); the class isn't shipped in the release jar.
