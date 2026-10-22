@@ -5,6 +5,16 @@ It works on any server, because everything happens on your own game.
 
 By **PlayWit Creations**. (Called Container Peek before 3.0.0: your saved containers and settings carry over by themselves.)
 
+## Installing
+1. Install [Fabric Loader](https://fabricmc.net/use/) for Minecraft **1.21.11**, plus
+   [Fabric API](https://modrinth.com/mod/fabric-api).
+2. Get `hoard-eye-<version>+1.21.11.jar` from the [Releases](https://github.com/PlayWitIt/Hoard-Eye/releases) page
+   (or build it, see below), and put it in your `.minecraft/mods` folder. If you had Container Peek, remove its jar.
+
+Works well with [Base Insurance](https://github.com/PlayWitIt/Base-Insurance) (rebuild materials are fetched from your
+storage) and [Naughty or Nice](https://github.com/PlayWitIt/Naughty-or-Nice). All three share the Mods panel (Right
+Shift on the title screen).
+
 ## Features
 - **Look at a container** to see its name and contents next to your crosshair. Hoard Eye learns them when you open or place containers.
 - **Storage Search** (default key **Y**) searches every item in every container you've opened, including shulkers stored in chests. You can sort it, filter it, and click a result to be walked there by waypoint markers that show through walls.
