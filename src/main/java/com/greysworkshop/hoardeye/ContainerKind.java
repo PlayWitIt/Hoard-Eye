@@ -1,4 +1,4 @@
-package com.greysworkshop.containerpeek;
+package com.greysworkshop.hoardeye;
 
 import net.minecraft.block.CopperChestBlock;
 import net.minecraft.block.entity.BarrelBlockEntity;
@@ -35,7 +35,7 @@ public enum ContainerKind {
 	BREWING_STAND("block.minecraft.brewing_stand"),
 	CRAFTER("block.minecraft.crafter"),
 	/** Any other container, e.g. from other mods. */
-	OTHER("containerpeek.config.kind.other");
+	OTHER("hoardeye.config.kind.other");
 
 	private final String translationKey;
 

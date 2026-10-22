@@ -1,4 +1,4 @@
-package com.greysworkshop.containerpeek;
+package com.greysworkshop.hoardeye;
 
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;

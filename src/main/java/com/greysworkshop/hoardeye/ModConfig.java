@@ -1,4 +1,4 @@
-package com.greysworkshop.containerpeek;
+package com.greysworkshop.hoardeye;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -12,10 +12,10 @@ import java.nio.file.Path;
 import java.util.EnumMap;
 import java.util.Map;
 
-/** User settings, saved to config/containerpeek-config.json. */
+/** User settings, saved to config/hoardeye-config.json. */
 public final class ModConfig {
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-	private static final Path FILE = FabricLoader.getInstance().getConfigDir().resolve("containerpeek-config.json");
+	private static final Path FILE = FabricLoader.getInstance().getConfigDir().resolve("hoardeye-config.json");
 
 	public static ModConfig INSTANCE = new ModConfig();
 
@@ -124,7 +124,7 @@ public final class ModConfig {
 				INSTANCE = loaded;
 			}
 		} catch (IOException | RuntimeException e) {
-			ContainerPeekClient.LOGGER.error("Could not read {}", FILE, e);
+			HoardEyeClient.LOGGER.error("Could not read {}", FILE, e);
 		}
 	}
 
@@ -132,7 +132,7 @@ public final class ModConfig {
 		try (Writer writer = Files.newBufferedWriter(FILE)) {
 			GSON.toJson(INSTANCE, writer);
 		} catch (IOException e) {
-			ContainerPeekClient.LOGGER.error("Could not write {}", FILE, e);
+			HoardEyeClient.LOGGER.error("Could not write {}", FILE, e);
 		}
 	}
 }

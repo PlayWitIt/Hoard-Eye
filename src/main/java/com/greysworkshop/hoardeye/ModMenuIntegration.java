@@ -1,4 +1,4 @@
-package com.greysworkshop.containerpeek;
+package com.greysworkshop.hoardeye;
 
 import com.terraformersmc.modmenu.api.ConfigScreenFactory;
 import com.terraformersmc.modmenu.api.ModMenuApi;

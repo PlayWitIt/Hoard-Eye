@@ -1,4 +1,4 @@
-package com.greysworkshop.containerpeek.mixin;
+package com.greysworkshop.hoardeye.mixin;
 
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import org.spongepowered.asm.mixin.Mixin;
@@ -8,8 +8,8 @@ import org.spongepowered.asm.mixin.gen.Accessor;
 @Mixin(HandledScreen.class)
 public interface HandledScreenAccessor {
 	@Accessor("x")
-	int containerpeek$getX();
+	int hoardeye$getX();
 
 	@Accessor("y")
-	int containerpeek$getY();
+	int hoardeye$getY();
 }

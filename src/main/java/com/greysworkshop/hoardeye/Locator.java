@@ -1,4 +1,4 @@
-package com.greysworkshop.containerpeek;
+package com.greysworkshop.hoardeye;
 
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext;
 import net.minecraft.client.MinecraftClient;
@@ -69,7 +69,7 @@ public final class Locator {
 		targets.add(new Target(stop.dimension(), stop.pos(), stop.label(), stop.takes().get(0).icon()));
 		String takes = stop.takes().get(0).count() + " " + stop.takes().get(0).name()
 				+ (stop.takes().size() > 1 ? " +" + (stop.takes().size() - 1) + " more" : "");
-		what = Text.translatable("containerpeek.fetch.stop", routeIndex + 1, route.size(), takes).getString();
+		what = Text.translatable("hoardeye.fetch.stop", routeIndex + 1, route.size(), takes).getString();
 	}
 
 	/** The route stop at this container, if it's the one you're heading to. */
@@ -125,7 +125,7 @@ public final class Locator {
 	public static void tick(MinecraftClient client) {
 		// On a route, stops are done when you open them, not when you walk past.
 		if (targets.isEmpty() || route != null || client.player == null || client.world == null) return;
-		String dimension = ContainerPeekClient.dimensionKey(client.world);
+		String dimension = HoardEyeClient.dimensionKey(client.world);
 		double reach = ModConfig.INSTANCE.locatorReach + 0.5;
 		boolean removed = targets.removeIf(t -> t.dimension.equals(dimension)
 				&& client.player.getEyePos().distanceTo(Vec3d.ofCenter(t.pos)) <= reach);
@@ -137,7 +137,7 @@ public final class Locator {
 	}
 
 	private static Target nearest(MinecraftClient client) {
-		String dimension = ContainerPeekClient.dimensionKey(client.world);
+		String dimension = HoardEyeClient.dimensionKey(client.world);
 		Target best = null;
 		double bestDistance = Double.MAX_VALUE;
 		for (Target target : targets) {
@@ -160,7 +160,7 @@ public final class Locator {
 
 		if (targets.isEmpty()) {
 			if (System.currentTimeMillis() < foundUntil) {
-				drawPill(context, font, Text.translatable("containerpeek.locator.found"), centerX, y, 0xFF55FF55, ItemStack.EMPTY);
+				drawPill(context, font, Text.translatable("hoardeye.locator.found"), centerX, y, 0xFF55FF55, ItemStack.EMPTY);
 			}
 			return;
 		}
@@ -169,7 +169,7 @@ public final class Locator {
 		if (ModConfig.INSTANCE.locatorMarkers) drawMarkers(context, client, font, target);
 		if (target == null) {
 			String where = targets.get(0).dimension.replace("minecraft:", "").replace('_', ' ');
-			drawPill(context, font, Text.translatable("containerpeek.locator.other_dimension", what, where), centerX, y, 0xFFFFAA00, targets.get(0).icon);
+			drawPill(context, font, Text.translatable("hoardeye.locator.other_dimension", what, where), centerX, y, 0xFFFFAA00, targets.get(0).icon);
 			return;
 		}
 
@@ -202,7 +202,7 @@ public final class Locator {
 		double tanHalfFov = Math.tan(Math.toRadians(client.options.getFov().getValue()) / 2);
 		int w = context.getScaledWindowWidth(), h = context.getScaledWindowHeight();
 		double halfW = w / 2.0, halfH = h / 2.0;
-		String dimension = ContainerPeekClient.dimensionKey(client.world);
+		String dimension = HoardEyeClient.dimensionKey(client.world);
 		int margin = 18;
 
 		for (Target target : targets) {
@@ -276,7 +276,7 @@ public final class Locator {
 	public static void renderWorld(WorldRenderContext context) {
 		MinecraftClient client = MinecraftClient.getInstance();
 		if (targets.isEmpty() || client.world == null) return;
-		String dimension = ContainerPeekClient.dimensionKey(client.world);
+		String dimension = HoardEyeClient.dimensionKey(client.world);
 		Vec3d camera = client.gameRenderer.getCamera().getCameraPos();
 		MatrixStack matrices = context.matrices();
 		VertexConsumer lines = context.consumers().getBuffer(RenderLayers.lines());

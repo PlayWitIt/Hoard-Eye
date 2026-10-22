@@ -1,6 +1,6 @@
-package com.greysworkshop.containerpeek.mixin;
+package com.greysworkshop.hoardeye.mixin;
 
-import com.greysworkshop.containerpeek.ShulkerPreview;
+import com.greysworkshop.hoardeye.ShulkerPreview;
 import net.minecraft.component.ComponentType;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.TooltipDisplayComponent;
@@ -23,13 +23,13 @@ import java.util.function.Consumer;
 @Mixin(ItemStack.class)
 public abstract class ItemStackMixin {
 	@Inject(method = "getTooltipData", at = @At("HEAD"), cancellable = true)
-	private void containerpeek$shulkerPreview(CallbackInfoReturnable<Optional<TooltipData>> cir) {
+	private void hoardeye$shulkerPreview(CallbackInfoReturnable<Optional<TooltipData>> cir) {
 		Optional<TooltipData> data = ShulkerPreview.data((ItemStack) (Object) this);
 		if (data.isPresent()) cir.setReturnValue(data);
 	}
 
 	@Inject(method = "appendComponentTooltip", at = @At("HEAD"), cancellable = true)
-	private <T extends TooltipAppender> void containerpeek$hideContentsText(ComponentType<T> type, Item.TooltipContext context,
+	private <T extends TooltipAppender> void hoardeye$hideContentsText(ComponentType<T> type, Item.TooltipContext context,
 			TooltipDisplayComponent display, Consumer<Text> tooltip, TooltipType tooltipType, CallbackInfo ci) {
 		if (type == DataComponentTypes.CONTAINER && ShulkerPreview.applies((ItemStack) (Object) this)) ci.cancel();
 	}

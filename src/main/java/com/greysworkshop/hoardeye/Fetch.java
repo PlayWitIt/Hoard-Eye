@@ -1,6 +1,6 @@
-package com.greysworkshop.containerpeek;
+package com.greysworkshop.hoardeye;
 
-import com.greysworkshop.containerpeek.mixin.HandledScreenAccessor;
+import com.greysworkshop.hoardeye.mixin.HandledScreenAccessor;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
@@ -86,11 +86,11 @@ public final class Fetch {
 	}
 
 	/**
-	 * Picks up a list handed over by another mod (Base Insurance's "Fetch with Container Peek"), replacing the
+	 * Picks up a list handed over by another mod (Base Insurance's "Fetch with Hoard Eye"), replacing the
 	 * current list. Returns who sent it, or null if there was nothing to pick up.
 	 */
 	public static String importHandOff() {
-		java.nio.file.Path file = net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir().resolve("containerpeek-fetch.json");
+		java.nio.file.Path file = net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir().resolve("hoardeye-fetch.json");
 		if (!java.nio.file.Files.exists(file)) return null;
 		try {
 			com.google.gson.JsonObject root = com.google.gson.JsonParser.parseString(java.nio.file.Files.readString(file)).getAsJsonObject();
@@ -106,7 +106,7 @@ public final class Fetch {
 			}
 			return root.has("from") ? root.get("from").getAsString() : "another mod";
 		} catch (Exception e) {
-			ContainerPeekClient.LOGGER.warn("Could not read handed-over fetch list", e);
+			HoardEyeClient.LOGGER.warn("Could not read handed-over fetch list", e);
 			return null;
 		}
 	}
@@ -163,7 +163,7 @@ public final class Fetch {
 		MinecraftClient client = MinecraftClient.getInstance();
 		TextRenderer font = client.textRenderer;
 		HandledScreenAccessor panel = (HandledScreenAccessor) screen;
-		int left = panel.containerpeek$getX(), top = panel.containerpeek$getY();
+		int left = panel.hoardeye$getX(), top = panel.hoardeye$getY();
 
 		Map<String, Integer> wanted = new LinkedHashMap<>();
 		for (Take take : stop.takes()) wanted.put(take.key(), take.count());
@@ -177,7 +177,7 @@ public final class Fetch {
 
 		List<String> lines = new ArrayList<>();
 		for (Take take : stop.takes()) lines.add(take.count() + " × " + take.name());
-		String title = Text.translatable("containerpeek.fetch.take_here").getString();
+		String title = Text.translatable("hoardeye.fetch.take_here").getString();
 		int width = font.getWidth(title);
 		for (String line : lines) width = Math.max(width, font.getWidth(line) + 20);
 		int height = 14 + lines.size() * 18;

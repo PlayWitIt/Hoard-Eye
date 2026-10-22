@@ -1,4 +1,4 @@
-package com.greysworkshop.containerpeek;
+package com.greysworkshop.hoardeye;
 
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
@@ -44,6 +44,7 @@ public final class SelfTest {
 
 	private static boolean started;
 	private static int tick = -1;
+	private static int passed, failed;
 	private static BlockPos origin;
 	private static final List<BlockPos> containers = new ArrayList<>();
 
@@ -83,6 +84,9 @@ public final class SelfTest {
 		tick++;
 		switch (tick) {
 			case 100 -> {
+				java.nio.file.Path config = net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir();
+				check("files saved as Container Peek are carried over to Hoard Eye", java.nio.file.Files.exists(config.resolve("hoardeye.json"))
+						&& !java.nio.file.Files.exists(config.resolve("containerpeek.json")) && !java.nio.file.Files.exists(config.resolve("containerpeek-config.json")));
 				origin = client.player.getBlockPos();
 				ModConfig.INSTANCE.maxIcons = 27;
 				ModConfig.INSTANCE.iconsPerRow = 9;
@@ -92,6 +96,9 @@ public final class SelfTest {
 						shulker = origin.add(0, 0, -3), nested = origin.add(3, 0, 3);
 				containers.addAll(List.of(mixed, storage, barrel, shulker, nested));
 				server(client, w -> {
+					// The world is kept between runs: no chest left beside Storage by the double-chest check.
+					w.setBlockState(storage.east(), Blocks.AIR.getDefaultState());
+					w.setBlockState(storage.west(), Blocks.AIR.getDefaultState());
 					fill(w, mixed, Blocks.CHEST, null, new ItemStack(Items.DIAMOND, 5), new ItemStack(Items.IRON_INGOT, 64),
 							new ItemStack(Items.GOLD_INGOT, 32), new ItemStack(Items.EMERALD, 12), new ItemStack(Items.REDSTONE, 64),
 							new ItemStack(Items.LAPIS_LAZULI, 40), new ItemStack(Items.COAL, 64), new ItemStack(Items.QUARTZ, 20),
@@ -111,8 +118,8 @@ public final class SelfTest {
 			}
 			case 135, 160, 185, 210, 235 -> client.player.closeHandledScreen();
 			case 245 -> {
-				int remembered = ContainerPeekClient.INSTANCE.store()
-						.dimension(ContainerPeekClient.worldKey(client), ContainerPeekClient.dimensionKey(client.world)).size();
+				int remembered = HoardEyeClient.INSTANCE.store()
+						.dimension(HoardEyeClient.worldKey(client), HoardEyeClient.dimensionKey(client.world)).size();
 				check("all 5 containers remembered (" + remembered + ")", remembered == 5);
 				aimAt(client, containers.get(0));
 			}
@@ -235,13 +242,57 @@ public final class SelfTest {
 				client.player.closeHandledScreen();
 				Locator.stop();
 			}
+			// ---- Forgetting only what's certainly gone ----
 			case 550 -> {
 				client.setScreen(null);
-				log("DONE");
+				log("The barrel shows as stone, as anti-xray sends hidden containers (no break)");
+				client.world.setBlockState(containers.get(2), Blocks.STONE.getDefaultState());
+			}
+			case 600 -> {
+				check("a container hidden by anti-xray is still remembered", known(client, containers.get(2)));
+				log("The shulker box is broken while the player is there");
+				server(client, w -> w.setBlockState(containers.get(3), Blocks.AIR.getDefaultState()));
+				// And the barrel really goes too: the server sends air, which anti-xray never fakes.
+				server(client, w -> w.setBlockState(containers.get(2), Blocks.AIR.getDefaultState()));
+			}
+			case 640 -> {
+				check("a container broken in front of you is forgotten", !known(client, containers.get(3)));
+				check("one that turns to air is forgotten", !known(client, containers.get(2)));
+				// A second chest joins "Storage" on the side the pair is kept under: the name and contents go with it.
+				BlockPos storage = containers.get(1), east = storage.east(), west = storage.west();
+				boolean eastLower = east.asLong() < storage.asLong();
+				BlockPos partner = eastLower ? east : west;
+				log("A chest joins Storage on the " + (eastLower ? "east" : "west"));
+				var facing = net.minecraft.state.property.Properties.HORIZONTAL_FACING;
+				var type = net.minecraft.state.property.Properties.CHEST_TYPE;
+				server(client, w -> {
+					w.setBlockState(storage, w.getBlockState(storage).with(facing, Direction.NORTH)
+							.with(type, eastLower ? net.minecraft.block.enums.ChestType.LEFT : net.minecraft.block.enums.ChestType.RIGHT));
+					w.setBlockState(partner, Blocks.CHEST.getDefaultState().with(facing, Direction.NORTH)
+							.with(type, eastLower ? net.minecraft.block.enums.ChestType.RIGHT : net.minecraft.block.enums.ChestType.LEFT));
+				});
+				containers.set(1, partner);
+			}
+			case 680 -> {
+				NameStore.Entry pair = HoardEyeClient.INSTANCE.store().get(HoardEyeClient.worldKey(client),
+						HoardEyeClient.dimensionKey(client.world), containers.get(1));
+				check("a chest that becomes a double chest keeps its name and contents (" + (pair == null ? "none" : pair.name) + ")",
+						pair != null && pair.name.equals("Storage") && pair.items != null && !pair.items.isEmpty());
+				BlockPos partner = containers.get(1);
+				server(client, w -> w.setBlockState(partner, Blocks.AIR.getDefaultState()));
+				check("server addresses are one server however they're typed",
+						HoardEyeClient.normalizeAddress("2B2T.org:25565.").equals(HoardEyeClient.normalizeAddress("2b2t.org")));
+			}
+			case 690 -> {
+				log("DONE: " + passed + " passed, " + failed + " failed");
 				client.scheduleStop();
 			}
 			default -> {}
 		}
+	}
+
+	private static boolean known(MinecraftClient client, BlockPos pos) {
+		return HoardEyeClient.INSTANCE.store().get(HoardEyeClient.worldKey(client), HoardEyeClient.dimensionKey(client.world), pos) != null;
 	}
 
 	private static void fill(ServerWorld world, BlockPos pos, net.minecraft.block.Block block, String name, ItemStack... stacks) {
@@ -296,10 +347,12 @@ public final class SelfTest {
 	}
 
 	private static void check(String what, boolean ok) {
+		if (ok) passed++;
+		else failed++;
 		log((ok ? "PASS " : "FAIL ") + what);
 	}
 
 	private static void log(String message) {
-		ContainerPeekClient.LOGGER.info("[SELFTEST] {}", message);
+		HoardEyeClient.LOGGER.info("[SELFTEST] {}", message);
 	}
 }

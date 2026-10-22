@@ -1,4 +1,4 @@
-package com.greysworkshop.containerpeek;
+package com.greysworkshop.hoardeye;
 
 import net.minecraft.text.Text;
 
@@ -24,7 +24,7 @@ public enum HudPosition {
 	}
 
 	public Text getName() {
-		return Text.translatable("containerpeek.config.position." + key);
+		return Text.translatable("hoardeye.config.position." + key);
 	}
 
 	public HudPosition next() {

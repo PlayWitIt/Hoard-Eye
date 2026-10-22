@@ -1,4 +1,4 @@
-package com.greysworkshop.containerpeek;
+package com.greysworkshop.hoardeye;
 
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.gui.screen.ConfirmScreen;
@@ -9,9 +9,9 @@ import net.minecraft.util.Util;
 import java.util.List;
 import java.util.Locale;
 
-/** Container Peek settings, in tabs. */
+/** Hoard Eye settings, in tabs. */
 public class ConfigScreen extends OptionsScreen {
-	private static final String P = "containerpeek.config";
+	private static final String P = "hoardeye.config";
 
 	public ConfigScreen(Screen parent) {
 		super(parent, Text.translatable(P + ".title"), P);
@@ -86,15 +86,15 @@ public class ConfigScreen extends OptionsScreen {
 				new Tab("data", r -> {
 					r.note(Text.translatable(P + ".data_note"));
 					r.button("forget_world", () -> confirm(Text.translatable(P + ".forget_world.confirm"), () -> {
-						String world = ContainerPeekClient.worldKey(client);
+						String world = HoardEyeClient.worldKey(client);
 						if (world != null) {
-							ContainerPeekClient.INSTANCE.store().clearWorld(world);
-							ContainerPeekClient.INSTANCE.store().saveIfDirty();
+							HoardEyeClient.INSTANCE.store().clearWorld(world);
+							HoardEyeClient.INSTANCE.store().saveIfDirty();
 						}
 					}));
 					r.button("forget_all", () -> confirm(Text.translatable(P + ".forget_all.confirm"), () -> {
-						ContainerPeekClient.INSTANCE.store().clearAll();
-						ContainerPeekClient.INSTANCE.store().saveIfDirty();
+						HoardEyeClient.INSTANCE.store().clearAll();
+						HoardEyeClient.INSTANCE.store().saveIfDirty();
 					}));
 					r.button("open_folder", () -> Util.getOperatingSystem().open(FabricLoader.getInstance().getConfigDir()));
 				}));

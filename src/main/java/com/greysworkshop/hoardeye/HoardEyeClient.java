@@ -1,4 +1,4 @@
-package com.greysworkshop.containerpeek;
+package com.greysworkshop.hoardeye;
 
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
@@ -57,8 +57,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-public class ContainerPeekClient implements ClientModInitializer {
-	public static final String MOD_ID = "containerpeek";
+public class HoardEyeClient implements ClientModInitializer {
+	public static final String MOD_ID = "hoardeye";
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
 	/** How long (in ticks) after a right-click we still accept the resulting screen or placement. */
@@ -71,7 +71,7 @@ public class ContainerPeekClient implements ClientModInitializer {
 	/** Where a container's data is stored: a dimension key plus a position within it. */
 	private record Target(ContainerKind kind, String dimension, BlockPos pos) {}
 
-	public static ContainerPeekClient INSTANCE;
+	public static HoardEyeClient INSTANCE;
 
 	private final NameStore store = new NameStore();
 
@@ -99,11 +99,11 @@ public class ContainerPeekClient implements ClientModInitializer {
 
 		KeyBinding.Category category = KeyBinding.Category.create(Identifier.of(MOD_ID, "main"));
 		toggleKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-				"key.containerpeek.toggle", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, category));
+				"key.hoardeye.toggle", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, category));
 		configKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-				"key.containerpeek.config", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, category));
+				"key.hoardeye.config", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, category));
 		searchKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-				"key.containerpeek.search", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_Y, category));
+				"key.hoardeye.search", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_Y, category));
 
 		UseBlockCallback.EVENT.register((player, world, hand, hit) -> {
 			if (!world.isClient() || !ModConfig.INSTANCE.enabled || !ModConfig.INSTANCE.rememberContainers) return ActionResult.PASS;
@@ -180,9 +180,9 @@ public class ContainerPeekClient implements ClientModInitializer {
 		WorldRenderEvents.BEFORE_DEBUG_RENDER.register(Locator::renderWorld);
 
 		// Scripted development test (./gradlew runSelfTest); the class isn't shipped in the release jar.
-		if (Boolean.getBoolean("containerpeek.selftest")) {
+		if (Boolean.getBoolean("hoardeye.selftest")) {
 			try {
-				Class.forName("com.greysworkshop.containerpeek.SelfTest").getMethod("start").invoke(null);
+				Class.forName("com.greysworkshop.hoardeye.SelfTest").getMethod("start").invoke(null);
 			} catch (ReflectiveOperationException e) {
 				LOGGER.error("Self-test not available", e);
 			}
@@ -193,12 +193,16 @@ public class ContainerPeekClient implements ClientModInitializer {
 		return store;
 	}
 
-	/** Versions before 1.3.0 were called "Shulker Names"; carry their saved files over. */
+	/** Versions before 1.3.0 were called "Shulker Names", and before 3.0.0 "Container Peek"; carry their saved files over. */
 	private static void migrateOldFiles() {
 		Path dir = FabricLoader.getInstance().getConfigDir();
 		String[][] renames = {
-				{"shulkernames.json", "containerpeek.json"},
-				{"shulkernames-config.json", "containerpeek-config.json"},
+				{"shulkernames.json", "hoardeye.json"},
+				{"shulkernames-config.json", "hoardeye-config.json"},
+				// Hoard Eye was called Container Peek before 3.0.0.
+				{"containerpeek.json", "hoardeye.json"},
+				{"containerpeek-config.json", "hoardeye-config.json"},
+				{"containerpeek-fetch.json", "hoardeye-fetch.json"},
 		};
 		for (String[] rename : renames) {
 			Path from = dir.resolve(rename[0]);
@@ -225,7 +229,7 @@ public class ContainerPeekClient implements ClientModInitializer {
 			ModConfig.save();
 			if (client.player != null) {
 				client.player.sendMessage(Text.translatable(ModConfig.INSTANCE.enabled
-						? "containerpeek.toggled_on" : "containerpeek.toggled_off"), true);
+						? "hoardeye.toggled_on" : "hoardeye.toggled_off"), true);
 			}
 		}
 
@@ -237,7 +241,7 @@ public class ContainerPeekClient implements ClientModInitializer {
 			ModConfig.INSTANCE.seenHint = true;
 			ModConfig.save();
 			client.inGameHud.getChatHud().addMessage(Text.empty()
-					.append(Text.literal("[Container Peek] ").formatted(Formatting.GOLD))
+					.append(Text.literal("[Hoard Eye] ").formatted(Formatting.GOLD))
 					.append(Text.literal("Tip: press ").formatted(Formatting.GRAY))
 					.append(searchKey.getBoundKeyLocalizedText().copy().formatted(Formatting.AQUA))
 					.append(Text.literal(" to search everything in your containers and get walked to it.").formatted(Formatting.GRAY)));
@@ -266,16 +270,23 @@ public class ContainerPeekClient implements ClientModInitializer {
 			}
 		}
 
-		// Once a second, forget containers that are gone (broken or picked up) in loaded chunks.
+		// Once a second, forget containers that are certainly gone. Not just "no container there": servers with
+		// anti-xray send hidden chests and barrels as stone until you're close, which used to wipe whole bases. Gone
+		// is: the spot is air or liquid (anti-xray never fakes those), or you're looking right at it up close and it
+		// isn't a container. (A break while you're there is caught as it happens, in blockChanged.)
 		if (ModConfig.INSTANCE.forgetBroken && ++cleanupTimer >= 20) {
 			cleanupTimer = 0;
 			Map<Long, NameStore.Entry> entries = store.dimension(world, dimension);
+			BlockPos aimed = client.crosshairTarget instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK
+					&& client.player.getEyePos().distanceTo(hit.getBlockPos().toCenterPos()) <= 6 ? hit.getBlockPos() : null;
 			Iterator<Map.Entry<Long, NameStore.Entry>> it = entries.entrySet().iterator();
 			while (it.hasNext()) {
 				BlockPos pos = BlockPos.fromLong(it.next().getKey());
 				if (pos.equals(pendingPlace)) continue;
 				if (!client.world.isChunkLoaded(pos.getX() >> 4, pos.getZ() >> 4)) continue;
-				if (resolve(client.world, pos) == null) {
+				if (resolve(client.world, pos) != null) continue;
+				BlockState state = client.world.getBlockState(pos);
+				if (state.isAir() || !state.getFluidState().isEmpty() && !state.isSolidBlock(client.world, pos) || pos.equals(aimed)) {
 					it.remove();
 					store.markDirty();
 				}
@@ -305,7 +316,7 @@ public class ContainerPeekClient implements ClientModInitializer {
 		if (entry == null) {
 			if (!config.showUnknownHint) return;
 			Text blockName = client.world.getBlockState(hit.getBlockPos()).getBlock().getName();
-			line = Text.translatable("containerpeek.unknown", blockName);
+			line = Text.translatable("hoardeye.unknown", blockName);
 			lineColor = 0xFFAAAAAA;
 		} else {
 			if (config.showNames && !entry.name.isEmpty()) {
@@ -316,11 +327,11 @@ public class ContainerPeekClient implements ClientModInitializer {
 			if (stacks != null && !stacks.isEmpty()) {
 				grid = ItemGrid.of(stacks, config.maxIcons, Math.max(1, config.iconsPerRow), config.showMoreCount, font);
 			} else if (stacks != null && line == null) {
-				line = Text.translatable("containerpeek.empty");
+				line = Text.translatable("hoardeye.empty");
 				lineColor = 0xFFAAAAAA;
 			} else if (stacks != null) {
 				line = Text.empty().append(line).append(" ")
-						.append(Text.translatable("containerpeek.empty").formatted(Formatting.GRAY));
+						.append(Text.translatable("hoardeye.empty").formatted(Formatting.GRAY));
 			}
 		}
 		if (line == null && grid == null) return;
@@ -448,6 +459,37 @@ public class ContainerPeekClient implements ClientModInitializer {
 
 
 	/**
+	 * The server says the block at {@code pos} is changing to {@code state} (called before the change). A container
+	 * broken or replaced is forgotten; a chest that joins or leaves a double chest keeps what it held, under the
+	 * spot the pair is now kept by.
+	 */
+	public void blockChanged(ClientWorld world, BlockPos pos, BlockState state) {
+		MinecraftClient client = MinecraftClient.getInstance();
+		String key = worldKey(client);
+		if (key == null || !ModConfig.INSTANCE.enabled) return;
+		String dimension = dimensionKey(world);
+		BlockState old = world.getBlockState(pos);
+		// Chests pairing up: the pair is kept under its lower spot.
+		if (state.getBlock() instanceof ChestBlock && ChestBlock.getDoubleBlockType(state) != DoubleBlockProperties.Type.SINGLE) {
+			BlockPos other = pos.offset(ChestBlock.getFacing(state));
+			BlockPos keep = other.asLong() < pos.asLong() ? other : pos;
+			store.move(key, dimension, keep.equals(pos) ? other : pos, keep);
+			store.saveIfDirty();
+			return;
+		}
+		if (old.getBlock() == state.getBlock() || !ModConfig.INSTANCE.forgetBroken) return;
+		if (ContainerKind.of(world.getBlockEntity(pos)) == null) return;
+		// Half of a double chest broken: the other half is a single chest now, kept under its own spot.
+		if (old.getBlock() instanceof ChestBlock && ChestBlock.getDoubleBlockType(old) != DoubleBlockProperties.Type.SINGLE) {
+			BlockPos other = pos.offset(ChestBlock.getFacing(old));
+			if (pos.asLong() < other.asLong()) store.move(key, dimension, pos, other);
+		} else {
+			store.forget(key, dimension, pos);
+		}
+		store.saveIfDirty();
+	}
+
+	/**
 	 * Works out where the container at {@code pos} is stored, or returns null if it isn't a container.
 	 * Both halves of a double chest share one entry, and all ender chests share one entry.
 	 */
@@ -483,10 +525,19 @@ public class ContainerPeekClient implements ClientModInitializer {
 		return title.getString();
 	}
 
-	/** Identifies the server (by address) or singleplayer world (by folder name). */
+	/** "Constantiam.net", "constantiam.net:25565" and "constantiam.net." are one server. */
+	public static String normalizeAddress(String address) {
+		String a = address.strip().toLowerCase(java.util.Locale.ROOT);
+		while (a.endsWith(".")) a = a.substring(0, a.length() - 1);
+		if (a.endsWith(":25565")) a = a.substring(0, a.length() - 6);
+		while (a.endsWith(".")) a = a.substring(0, a.length() - 1);
+		return a;
+	}
+
+	/** Identifies the server (by address, tidied up) or singleplayer world (by folder name). */
 	public static String worldKey(MinecraftClient client) {
 		ServerInfo server = client.getCurrentServerEntry();
-		if (server != null) return "server:" + server.address;
+		if (server != null) return "server:" + normalizeAddress(server.address);
 		if (client.getServer() != null) return "local:" + client.getServer().getSaveProperties().getLevelName();
 		return null;
 	}
@@ -503,7 +554,7 @@ public class ContainerPeekClient implements ClientModInitializer {
 	/** This mod's part of the mods panel (Right Shift on the title screen): the switches worth flipping before joining. */
 	private static java.util.Map<String, Object> panelEntry() {
 		ModConfig c = ModConfig.INSTANCE;
-		String P = "containerpeek.config";
+		String P = "hoardeye.config";
 		String version = net.fabricmc.loader.api.FabricLoader.getInstance().getModContainer(MOD_ID)
 				.map(m -> m.getMetadata().getVersion().getFriendlyString()).orElse("?").replaceAll("\\+.*", "");
 		java.util.List<java.util.Map<String, Object>> switches = java.util.List.of(
@@ -522,9 +573,9 @@ public class ContainerPeekClient implements ClientModInitializer {
 				ModsPanel.toggle(Text.translatable(P + ".locator_markers"), Text.translatable(P + ".locator_markers.desc"), () -> c.locatorMarkers, v -> c.locatorMarkers = v),
 				ModsPanel.toggle(Text.translatable(P + ".locator_beam"), Text.translatable(P + ".locator_beam.desc"), () -> c.locatorBeam, v -> c.locatorBeam = v),
 				ModsPanel.toggle(Text.translatable(P + ".found_sound"), Text.translatable(P + ".found_sound.desc"), () -> c.foundSound, v -> c.foundSound = v));
-		return java.util.Map.of("id", MOD_ID, "name", "Container Peek", "version", version, "icon", Identifier.of(MOD_ID, "icon.png"),
+		return java.util.Map.of("id", MOD_ID, "name", "Hoard Eye", "version", version, "icon", Identifier.of(MOD_ID, "icon.png"),
 				"settings", (java.util.function.Function<net.minecraft.client.gui.screen.Screen, net.minecraft.client.gui.screen.Screen>) ConfigScreen::new,
-				"save", (Runnable) ModConfig::save, "switches", switches);
+				"save", (Runnable) ModConfig::save, "data", java.util.List.of("hoardeye.json", "hoardeye-config.json", "hoardeye-fetch.json"), "switches", switches);
 	}
 
 	private static java.util.Map<String, Object> master(java.util.Map<String, Object> toggle) {

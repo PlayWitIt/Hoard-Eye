@@ -1,4 +1,4 @@
-package com.greysworkshop.containerpeek;
+package com.greysworkshop.hoardeye;
 
 import net.minecraft.block.Block;
 import net.minecraft.client.MinecraftClient;
@@ -131,7 +131,7 @@ public class SearchScreen extends Screen {
 	private int leftX0, leftX1, rightX0, rightX1;
 
 	public SearchScreen() {
-		super(Text.translatable("containerpeek.search.title"));
+		super(Text.translatable("hoardeye.search.title"));
 	}
 
 	// ---- Data ----
@@ -139,14 +139,14 @@ public class SearchScreen extends Screen {
 	private void loadBoxes() {
 		allBoxes.clear();
 		MinecraftClient mc = MinecraftClient.getInstance();
-		String worldKey = ContainerPeekClient.worldKey(mc);
+		String worldKey = HoardEyeClient.worldKey(mc);
 		if (worldKey == null || mc.world == null) return;
 		ClientWorld world = mc.world;
-		String here = ContainerPeekClient.dimensionKey(world);
+		String here = HoardEyeClient.dimensionKey(world);
 		Set<String> kinds = new HashSet<>();
 		totalItems = 0;
 
-		for (var dim : ContainerPeekClient.INSTANCE.store().world(worldKey).entrySet()) {
+		for (var dim : HoardEyeClient.INSTANCE.store().world(worldKey).entrySet()) {
 			for (var e : dim.getValue().entrySet()) {
 				NameStore.Entry entry = e.getValue();
 				List<ItemStack> stacks = entry.stacks(world.getRegistryManager());
@@ -168,7 +168,7 @@ public class SearchScreen extends Screen {
 				ItemStack icon = block != null && block.asItem() != Items.AIR ? new ItemStack(block.asItem()) : new ItemStack(Items.CHEST);
 				String label = !entry.name.isEmpty() ? entry.name
 						: block != null && block.asItem() != Items.AIR ? block.getName().getString()
-						: Text.translatable("containerpeek.search.container").getString();
+						: Text.translatable("hoardeye.search.container").getString();
 
 				int items = 0;
 				StringBuilder itemText = new StringBuilder();
@@ -324,14 +324,14 @@ public class SearchScreen extends Screen {
 		if (handedOver != null) {
 			// Another mod sent a list: show it straight away.
 			view = View.FETCH;
-			handOffNote = Text.translatable("containerpeek.fetch.imported", handedOver).getString();
+			handOffNote = Text.translatable("hoardeye.fetch.imported", handedOver).getString();
 		}
 		loadBoxes();
 
 		int contentWidth = width - 2 * PAD;
-		search = new TextFieldWidget(textRenderer, PAD + 1, 25, contentWidth - 2, 16, Text.translatable("containerpeek.search.title"));
+		search = new TextFieldWidget(textRenderer, PAD + 1, 25, contentWidth - 2, 16, Text.translatable("hoardeye.search.title"));
 		search.setMaxLength(64);
-		search.setPlaceholder(Text.translatable("containerpeek.search.placeholder").styled(s -> s.withColor(DIM)));
+		search.setPlaceholder(Text.translatable("hoardeye.search.placeholder").styled(s -> s.withColor(DIM)));
 		search.setText(lastQuery);
 		search.setChangedListener(text -> {
 			leftScroll = 0;
@@ -370,7 +370,7 @@ public class SearchScreen extends Screen {
 		rightX1 = width - PAD;
 
 		int half = (rightX1 - rightX0 - 12) / 2;
-		findButton = addDrawableChild(ButtonWidget.builder(Text.translatable("containerpeek.search.find"), b -> {
+		findButton = addDrawableChild(ButtonWidget.builder(Text.translatable("hoardeye.search.find"), b -> {
 			if (view == View.FETCH) startRoute();
 			else findNearest();
 		}).dimensions(rightX0 + 4, bodyBottom - 24, half, 20).build());
@@ -382,13 +382,13 @@ public class SearchScreen extends Screen {
 				highlightAll();
 			}
 		}).dimensions(rightX0 + 8 + half, bodyBottom - 24, half, 20).build());
-		fetchButton = addDrawableChild(ButtonWidget.builder(Text.translatable("containerpeek.fetch.add"), b -> {
+		fetchButton = addDrawableChild(ButtonWidget.builder(Text.translatable("hoardeye.fetch.add"), b -> {
 			if (selectedGroup != null) {
 				Fetch.addStack(selectedGroup.icon);
 				updateButtons();
 			}
 		}).dimensions(rightX1 - 64, bodyTop + 18, 58, 20).build());
-		stopButton = addDrawableChild(ButtonWidget.builder(Text.translatable("containerpeek.search.stop"), b -> {
+		stopButton = addDrawableChild(ButtonWidget.builder(Text.translatable("hoardeye.search.stop"), b -> {
 			Locator.stop();
 			updateButtons();
 		}).dimensions(width - PAD - 100, height - 24, 100, 20).build());
@@ -414,13 +414,13 @@ public class SearchScreen extends Screen {
 	}
 
 	private Text sortLabel() {
-		if (view == View.FETCH) return Text.translatable("containerpeek.search.sort", "—");
+		if (view == View.FETCH) return Text.translatable("hoardeye.search.sort", "—");
 		return label("sort", view == View.ITEMS ? itemSort.name() : boxSort.name());
 	}
 
 	private static Text label(String key, String value) {
-		return Text.translatable("containerpeek.search." + key,
-				Text.translatable("containerpeek.search." + key + "." + value.toLowerCase(Locale.ROOT)));
+		return Text.translatable("hoardeye.search." + key,
+				Text.translatable("hoardeye.search." + key + "." + value.toLowerCase(Locale.ROOT)));
 	}
 
 	private void updateButtons() {
@@ -428,20 +428,20 @@ public class SearchScreen extends Screen {
 		stopButton.visible = Locator.active();
 		fetchButton.visible = view == View.ITEMS && selectedGroup != null;
 		if (fetchButton.visible) {
-			fetchButton.setTooltip(net.minecraft.client.gui.tooltip.Tooltip.of(Text.translatable("containerpeek.fetch.add.tooltip", Fetch.size())));
+			fetchButton.setTooltip(net.minecraft.client.gui.tooltip.Tooltip.of(Text.translatable("hoardeye.fetch.add.tooltip", Fetch.size())));
 		}
 		if (view == View.FETCH) {
-			findButton.setMessage(Text.translatable("containerpeek.fetch.start"));
+			findButton.setMessage(Text.translatable("hoardeye.fetch.start"));
 			findButton.active = !fetchRoute.isEmpty();
-			allButton.setMessage(Text.translatable("containerpeek.fetch.clear"));
+			allButton.setMessage(Text.translatable("hoardeye.fetch.clear"));
 			allButton.active = Fetch.size() > 0;
 			return;
 		}
 		List<Locator.Target> targets = currentTargets();
-		findButton.setMessage(Text.translatable("containerpeek.search.find"));
+		findButton.setMessage(Text.translatable("hoardeye.search.find"));
 		findButton.active = !targets.isEmpty();
 		allButton.active = targets.size() > 1;
-		allButton.setMessage(Text.translatable("containerpeek.search.highlight_all", targets.size()));
+		allButton.setMessage(Text.translatable("hoardeye.search.highlight_all", targets.size()));
 	}
 
 	// ---- Fetch list ----
@@ -455,7 +455,7 @@ public class SearchScreen extends Screen {
 	/** Containers in this dimension you can walk to, with how many of each item they hold. */
 	private List<Fetch.Candidate> candidates() {
 		MinecraftClient mc = MinecraftClient.getInstance();
-		String here = ContainerPeekClient.dimensionKey(mc.world);
+		String here = HoardEyeClient.dimensionKey(mc.world);
 		List<Fetch.Candidate> result = new ArrayList<>();
 		for (Box box : allBoxes) {
 			if (!box.findable() || !box.dimension.equals(here)) continue;
@@ -654,22 +654,22 @@ public class SearchScreen extends Screen {
 
 		// Header.
 		context.drawTextWithShadow(font, Text.literal("▣ ").styled(s -> s.withColor(ACCENT)).append(title), PAD, 9, GOLD);
-		String stats = Text.translatable("containerpeek.search.stats", allBoxes.size(), fmt(totalItems), totalKinds).getString();
+		String stats = Text.translatable("hoardeye.search.stats", allBoxes.size(), fmt(totalItems), totalKinds).getString();
 		context.drawTextWithShadow(font, stats, width - PAD - font.getWidth(stats), 9, GRAY);
 		panel(context, PAD, 23, width - PAD, 43);
 
 		// Left list.
 		String leftTitle = switch (view) {
-			case ITEMS -> Text.translatable("containerpeek.search.items_header", groups.size()).getString();
-			case CONTAINERS -> Text.translatable("containerpeek.search.containers_header", boxes.size()).getString();
-			case FETCH -> Text.translatable("containerpeek.fetch.header", Fetch.size()).getString();
+			case ITEMS -> Text.translatable("hoardeye.search.items_header", groups.size()).getString();
+			case CONTAINERS -> Text.translatable("hoardeye.search.containers_header", boxes.size()).getString();
+			case FETCH -> Text.translatable("hoardeye.fetch.header", Fetch.size()).getString();
 		};
 		panelWithHeader(context, leftX0, bodyTop, leftX1, bodyBottom, leftTitle);
 		fetchHits.clear();
 		if (view == View.FETCH) {
 			drawFetchList(context, mouseX, mouseY);
 		} else if (allBoxes.isEmpty()) {
-			drawWrapped(context, Text.translatable("containerpeek.search.empty_world").getString(), leftX0 + 6, bodyTop + 22, leftX1 - leftX0 - 12, GRAY);
+			drawWrapped(context, Text.translatable("hoardeye.search.empty_world").getString(), leftX0 + 6, bodyTop + 22, leftX1 - leftX0 - 12, GRAY);
 		} else if (view == View.ITEMS) {
 			drawGroupList(context, mouseX, mouseY);
 		} else {
@@ -678,17 +678,17 @@ public class SearchScreen extends Screen {
 
 		// Right details.
 		panelWithHeader(context, rightX0, bodyTop, rightX1, bodyBottom, view == View.FETCH
-				? Text.translatable("containerpeek.fetch.route_header", fetchRoute.size()).getString()
-				: Text.translatable("containerpeek.search.details").getString());
+				? Text.translatable("hoardeye.fetch.route_header", fetchRoute.size()).getString()
+				: Text.translatable("hoardeye.search.details").getString());
 		if (view == View.ITEMS) drawGroupDetails(context, mouseX, mouseY);
 		else if (view == View.CONTAINERS) drawBoxDetails(context, mouseX, mouseY);
 		else drawRoute(context);
 
 		// Footer hint.
 		String hint = Text.translatable(switch (view) {
-			case ITEMS -> "containerpeek.search.hint_items";
-			case CONTAINERS -> "containerpeek.search.hint_containers";
-			case FETCH -> "containerpeek.fetch.hint";
+			case ITEMS -> "hoardeye.search.hint_items";
+			case CONTAINERS -> "hoardeye.search.hint_containers";
+			case FETCH -> "hoardeye.fetch.hint";
 		}).getString();
 		context.drawTextWithShadow(font, font.trimToWidth(hint, width - 2 * PAD - (Locator.active() ? 108 : 0)), PAD, height - 18, DIM);
 	}
@@ -709,7 +709,7 @@ public class SearchScreen extends Screen {
 				rowBackground(context, leftX0 + 1, y, leftX1 - 1, group == selectedGroup, hovered);
 				context.drawItem(group.icon, leftX0 + 5, y + 2);
 				String count = "×" + fmt(group.total);
-				String spread = Text.translatable("containerpeek.search.in_containers", group.spread()).getString();
+				String spread = Text.translatable("hoardeye.search.in_containers", group.spread()).getString();
 				int rightWidth = textRenderer.getWidth(count) + textRenderer.getWidth(spread) + 10;
 				int nameWidth = leftX1 - leftX0 - 30 - rightWidth;
 				context.drawTextWithShadow(textRenderer, textRenderer.trimToWidth(group.name, nameWidth), leftX0 + 25, y + 6, WHITE);
@@ -721,7 +721,7 @@ public class SearchScreen extends Screen {
 		}
 		context.disableScissor();
 		if (groups.isEmpty()) {
-			context.drawTextWithShadow(textRenderer, Text.translatable("containerpeek.search.no_results"), leftX0 + 6, top + 6, GRAY);
+			context.drawTextWithShadow(textRenderer, Text.translatable("hoardeye.search.no_results"), leftX0 + 6, top + 6, GRAY);
 		}
 		scrollbar(context, leftX1 - 4, top, bodyBottom - 1, leftScroll, maxLeftScroll());
 	}
@@ -747,7 +747,7 @@ public class SearchScreen extends Screen {
 		}
 		context.disableScissor();
 		if (boxes.isEmpty()) {
-			context.drawTextWithShadow(textRenderer, Text.translatable("containerpeek.search.no_results"), leftX0 + 6, top + 6, GRAY);
+			context.drawTextWithShadow(textRenderer, Text.translatable("hoardeye.search.no_results"), leftX0 + 6, top + 6, GRAY);
 		}
 		scrollbar(context, leftX1 - 4, top, bodyBottom - 1, leftScroll, maxLeftScroll());
 	}
@@ -756,7 +756,7 @@ public class SearchScreen extends Screen {
 		int x = rightX0 + 6;
 		int y = bodyTop + 18;
 		if (selectedGroup == null) {
-			drawWrapped(context, Text.translatable("containerpeek.search.select_item").getString(), x, y, rightX1 - rightX0 - 12, GRAY);
+			drawWrapped(context, Text.translatable("hoardeye.search.select_item").getString(), x, y, rightX1 - rightX0 - 12, GRAY);
 			return;
 		}
 		Group group = selectedGroup;
@@ -764,7 +764,7 @@ public class SearchScreen extends Screen {
 		if (mouseX >= x && mouseX < x + 32 && mouseY >= y && mouseY < y + 32) setHovered(group.icon, mouseX, mouseY);
 		int textX = x + 38;
 		context.drawTextWithShadow(textRenderer, textRenderer.trimToWidth(group.name, rightX1 - textX - 70), textX, y + 4, WHITE);
-		String summary = Text.translatable("containerpeek.search.group_summary", fmt(group.total), group.spread()).getString();
+		String summary = Text.translatable("hoardeye.search.group_summary", fmt(group.total), group.spread()).getString();
 		context.drawTextWithShadow(textRenderer, textRenderer.trimToWidth(summary, rightX1 - textX - 70), textX, y + 17, GOLD);
 
 		int top = bodyTop + 50;
@@ -794,7 +794,7 @@ public class SearchScreen extends Screen {
 		int x = rightX0 + 6;
 		int y = bodyTop + 18;
 		if (selectedBox == null) {
-			drawWrapped(context, Text.translatable("containerpeek.search.select_container").getString(), x, y, rightX1 - rightX0 - 12, GRAY);
+			drawWrapped(context, Text.translatable("hoardeye.search.select_container").getString(), x, y, rightX1 - rightX0 - 12, GRAY);
 			return;
 		}
 		Box box = selectedBox;
@@ -802,7 +802,7 @@ public class SearchScreen extends Screen {
 		int textX = x + 38;
 		context.drawTextWithShadow(textRenderer, textRenderer.trimToWidth(box.label, rightX1 - textX - 6), textX, y + 2, WHITE);
 		context.drawTextWithShadow(textRenderer, textRenderer.trimToWidth(locationText(box), rightX1 - textX - 6), textX, y + 13, GRAY);
-		String checked = box.updated > 0 ? Text.translatable("containerpeek.search.checked", ago(box.updated)).getString() : "";
+		String checked = box.updated > 0 ? Text.translatable("hoardeye.search.checked", ago(box.updated)).getString() : "";
 		context.drawTextWithShadow(textRenderer, checked, textX, y + 24, DIM);
 
 		// The contents as a grid.
@@ -823,7 +823,7 @@ public class SearchScreen extends Screen {
 				setHovered(stack, mouseX, mouseY);
 			}
 		}
-		if (stacks.isEmpty()) context.drawTextWithShadow(textRenderer, Text.translatable("containerpeek.empty"), gridX, gridY, GRAY);
+		if (stacks.isEmpty()) context.drawTextWithShadow(textRenderer, Text.translatable("hoardeye.empty"), gridX, gridY, GRAY);
 	}
 
 	/** The fetch list: each item with how many you want and how many are stored, plus − / + / ✖ chips. */
@@ -831,7 +831,7 @@ public class SearchScreen extends Screen {
 		int top = bodyTop + 16;
 		List<Fetch.Want> wants = Fetch.wants();
 		if (wants.isEmpty()) {
-			drawWrapped(context, Text.translatable("containerpeek.fetch.empty").getString(), leftX0 + 6, top + 6, leftX1 - leftX0 - 12, GRAY);
+			drawWrapped(context, Text.translatable("hoardeye.fetch.empty").getString(), leftX0 + 6, top + 6, leftX1 - leftX0 - 12, GRAY);
 			return;
 		}
 		context.enableScissor(leftX0 + 1, top, leftX1 - 1, bodyBottom - 1);
@@ -843,7 +843,7 @@ public class SearchScreen extends Screen {
 				context.drawItem(want.icon, leftX0 + 5, y + 2);
 				int have = fetchAvailable.getOrDefault(want.key, 0);
 				String count = "×" + fmt(want.count);
-				String stock = Text.translatable("containerpeek.fetch.stored", fmt(have)).getString();
+				String stock = Text.translatable("hoardeye.fetch.stored", fmt(have)).getString();
 				int chipsWidth = 3 * 16;
 				int x = leftX1 - 6 - chipsWidth;
 				// Right to left: chips, stored, wanted; the name gets whatever room is left.
@@ -876,7 +876,7 @@ public class SearchScreen extends Screen {
 		int y = bodyTop + 20;
 		int width = rightX1 - rightX0 - 12;
 		if (Fetch.size() == 0) {
-			drawWrapped(context, Text.translatable("containerpeek.fetch.route_empty").getString(), x, y, width, GRAY);
+			drawWrapped(context, Text.translatable("hoardeye.fetch.route_empty").getString(), x, y, width, GRAY);
 			return;
 		}
 		int bottom = bodyBottom - 28;
@@ -972,13 +972,13 @@ public class SearchScreen extends Screen {
 	}
 
 	private static String whereText(Box box) {
-		if (box.dimension.equals(ENDER)) return Text.translatable("containerpeek.search.ender").getString();
+		if (box.dimension.equals(ENDER)) return Text.translatable("hoardeye.search.ender").getString();
 		if (box.distance != Double.MAX_VALUE) return (int) box.distance + "m";
 		return dimensionName(box.dimension);
 	}
 
 	private static String locationText(Box box) {
-		if (box.dimension.equals(ENDER)) return Text.translatable("containerpeek.search.ender_long").getString();
+		if (box.dimension.equals(ENDER)) return Text.translatable("hoardeye.search.ender_long").getString();
 		String coords = box.pos.getX() + " " + box.pos.getY() + " " + box.pos.getZ();
 		return box.distance != Double.MAX_VALUE ? coords + "  ·  " + (int) box.distance + "m" : coords + "  ·  " + dimensionName(box.dimension);
 	}

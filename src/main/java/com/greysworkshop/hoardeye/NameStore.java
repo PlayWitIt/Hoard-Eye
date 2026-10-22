@@ -1,4 +1,4 @@
-package com.greysworkshop.containerpeek;
+package com.greysworkshop.hoardeye;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -68,7 +68,7 @@ public final class NameStore {
 			})
 			.create();
 	private static final Type TYPE = new TypeToken<Map<String, Map<String, Map<Long, Entry>>>>() {}.getType();
-	private static final Path FILE = FabricLoader.getInstance().getConfigDir().resolve("containerpeek.json");
+	private static final Path FILE = FabricLoader.getInstance().getConfigDir().resolve("hoardeye.json");
 
 	private Map<String, Map<String, Map<Long, Entry>>> data = new HashMap<>();
 	private boolean dirty;
@@ -78,8 +78,9 @@ public final class NameStore {
 		try (Reader reader = Files.newBufferedReader(FILE)) {
 			Map<String, Map<String, Map<Long, Entry>>> loaded = GSON.fromJson(reader, TYPE);
 			if (loaded != null) data = loaded;
+			mergeServerSpellings();
 		} catch (IOException | RuntimeException e) {
-			ContainerPeekClient.LOGGER.error("Could not read {}", FILE, e);
+			HoardEyeClient.LOGGER.error("Could not read {}", FILE, e);
 		}
 	}
 
@@ -89,8 +90,43 @@ public final class NameStore {
 		try (Writer writer = Files.newBufferedWriter(FILE)) {
 			GSON.toJson(data, TYPE, writer);
 		} catch (IOException e) {
-			ContainerPeekClient.LOGGER.error("Could not write {}", FILE, e);
+			HoardEyeClient.LOGGER.error("Could not write {}", FILE, e);
 		}
+	}
+
+	/**
+	 * Versions before 3.0.0 kept each spelling of a server's address apart ("2B2T.org", "2b2t.org:25565"), so
+	 * connecting another way looked like everything was forgotten. Joins them under one key, keeping the newer
+	 * of two entries for the same spot.
+	 */
+	private void mergeServerSpellings() {
+		Map<String, Map<String, Map<Long, Entry>>> merged = new HashMap<>();
+		for (Map.Entry<String, Map<String, Map<Long, Entry>>> w : data.entrySet()) {
+			String key = w.getKey().startsWith("server:") ? "server:" + HoardEyeClient.normalizeAddress(w.getKey().substring(7)) : w.getKey();
+			if (!key.equals(w.getKey())) dirty = true;
+			Map<String, Map<Long, Entry>> into = merged.computeIfAbsent(key, k -> new HashMap<>());
+			for (Map.Entry<String, Map<Long, Entry>> d : w.getValue().entrySet()) {
+				Map<Long, Entry> dim = into.computeIfAbsent(d.getKey(), k -> new HashMap<>());
+				for (Map.Entry<Long, Entry> e : d.getValue().entrySet()) {
+					dim.merge(e.getKey(), e.getValue(), (a, b) -> a.updated >= b.updated ? a : b);
+				}
+			}
+		}
+		data = merged;
+	}
+
+	/** Moves what's known about one spot to another (a chest that became, or stopped being, half of a double chest). */
+	public void move(String world, String dimension, BlockPos from, BlockPos to) {
+		Map<Long, Entry> dim = dimension(world, dimension);
+		Entry entry = dim.remove(from.asLong());
+		if (entry == null) return;
+		Entry there = dim.get(to.asLong());
+		if (there == null || there.updated < entry.updated) dim.put(to.asLong(), entry);
+		dirty = true;
+	}
+
+	public void forget(String world, String dimension, BlockPos pos) {
+		if (dimension(world, dimension).remove(pos.asLong()) != null) dirty = true;
 	}
 
 	/** Returns what we know about the box at {@code pos}, or null if never seen. */

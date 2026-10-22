@@ -40,7 +40,7 @@ java {
 
 // The scripted self-test is for development only.
 jar {
-	exclude 'com/greysworkshop/containerpeek/SelfTest*'
+	exclude 'com/greysworkshop/hoardeye/SelfTest*'
 }
 
 loom {
@@ -48,7 +48,7 @@ loom {
 		selfTest {
 			client()
 			name = "Self Test"
-			vmArgs "-Dcontainerpeek.selftest=true", "-Xmx1536m"
+			vmArgs "-Dhoardeye.selftest=true", "-Xmx1536m"
 			runDir "run"
 		}
 	}
