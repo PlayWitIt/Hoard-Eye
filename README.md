@@ -10,6 +10,10 @@ It works on any server, because everything happens on your own game.
 - **Shulker box tooltips** show the contents as a 9×3 grid of icons.
 - **Detailed settings** (Mod Menu or a key you bind): the label's look and position, which container types get labels, the locator, and your saved data.
 
+**Mods panel:** press **Right Shift** on the title screen, the server or world list, or the pause menu, or click
+**Mods panel** at the top left of the title screen. It shows the main switches of every PlayWit mod you have (Naughty or Nice,
+Base Insurance, Container Peek), so you can turn something off before you join a world, and opens each one's full settings.
+
 ## Building
 Requires JDK 21. Run `./gradlew build`; the jar goes to `build/libs/`.
 `./gradlew runSelfTest` runs a scripted in-game test that saves screenshots to `run/screenshots/`.

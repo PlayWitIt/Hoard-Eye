@@ -94,6 +94,7 @@ public class ContainerPeekClient implements ClientModInitializer {
 		INSTANCE = this;
 		migrateOldFiles();
 		ModConfig.load();
+		ModsPanel.install(panelEntry());
 		store.load();
 
 		KeyBinding.Category category = KeyBinding.Category.create(Identifier.of(MOD_ID, "main"));
@@ -497,5 +498,38 @@ public class ContainerPeekClient implements ClientModInitializer {
 
 	public static String dimensionKey(ClientWorld world) {
 		return world.getRegistryKey().getValue().toString();
+	}
+
+	/** This mod's part of the mods panel (Right Shift on the title screen): the switches worth flipping before joining. */
+	private static java.util.Map<String, Object> panelEntry() {
+		ModConfig c = ModConfig.INSTANCE;
+		String P = "containerpeek.config";
+		String version = net.fabricmc.loader.api.FabricLoader.getInstance().getModContainer(MOD_ID)
+				.map(m -> m.getMetadata().getVersion().getFriendlyString()).orElse("?").replaceAll("\\+.*", "");
+		java.util.List<java.util.Map<String, Object>> switches = java.util.List.of(
+				master(ModsPanel.toggle(Text.translatable(P + ".enabled"), Text.translatable(P + ".enabled.desc"), () -> c.enabled, v -> c.enabled = v)),
+				ModsPanel.section("Remembering"),
+				ModsPanel.toggle(Text.translatable(P + ".remember"), Text.translatable(P + ".remember.desc"), () -> c.rememberContainers, v -> c.rememberContainers = v),
+				ModsPanel.toggle(Text.translatable(P + ".forget_broken"), Text.translatable(P + ".forget_broken.desc"), () -> c.forgetBroken, v -> c.forgetBroken = v),
+				ModsPanel.section("Label"),
+				ModsPanel.toggle(Text.translatable(P + ".show_names"), Text.translatable(P + ".show_names.desc"), () -> c.showNames, v -> c.showNames = v),
+				ModsPanel.toggle(Text.translatable(P + ".show_contents"), Text.translatable(P + ".show_contents.desc"), () -> c.showContents, v -> c.showContents = v),
+				ModsPanel.toggle(Text.translatable(P + ".show_unknown_hint"), Text.translatable(P + ".show_unknown_hint.desc"), () -> c.showUnknownHint, v -> c.showUnknownHint = v),
+				ModsPanel.section("Shulker boxes"),
+				ModsPanel.toggle(Text.translatable(P + ".shulker_tooltip"), Text.translatable(P + ".shulker_tooltip.desc"), () -> c.shulkerTooltip, v -> c.shulkerTooltip = v),
+				ModsPanel.toggle(Text.translatable(P + ".shulker_shift"), Text.translatable(P + ".shulker_shift.desc"), () -> c.shulkerTooltipShiftOnly, v -> c.shulkerTooltipShiftOnly = v),
+				ModsPanel.section("Finding"),
+				ModsPanel.toggle(Text.translatable(P + ".locator_markers"), Text.translatable(P + ".locator_markers.desc"), () -> c.locatorMarkers, v -> c.locatorMarkers = v),
+				ModsPanel.toggle(Text.translatable(P + ".locator_beam"), Text.translatable(P + ".locator_beam.desc"), () -> c.locatorBeam, v -> c.locatorBeam = v),
+				ModsPanel.toggle(Text.translatable(P + ".found_sound"), Text.translatable(P + ".found_sound.desc"), () -> c.foundSound, v -> c.foundSound = v));
+		return java.util.Map.of("id", MOD_ID, "name", "Container Peek", "version", version, "icon", Identifier.of(MOD_ID, "icon.png"),
+				"settings", (java.util.function.Function<net.minecraft.client.gui.screen.Screen, net.minecraft.client.gui.screen.Screen>) ConfigScreen::new,
+				"save", (Runnable) ModConfig::save, "switches", switches);
+	}
+
+	private static java.util.Map<String, Object> master(java.util.Map<String, Object> toggle) {
+		java.util.Map<String, Object> m = new java.util.HashMap<>(toggle);
+		m.put("master", true);
+		return m;
 	}
 }
