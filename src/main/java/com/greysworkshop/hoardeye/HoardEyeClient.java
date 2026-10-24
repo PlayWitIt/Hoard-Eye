@@ -193,7 +193,10 @@ public class HoardEyeClient implements ClientModInitializer {
 
 	/** Versions before 1.3.0 were called "Shulker Names", and before 3.0.0 "Container Peek"; carry their saved files over. */
 	private static void migrateOldFiles() {
-		Path dir = FabricLoader.getInstance().getConfigDir();
+		migrateOldFiles(FabricLoader.getInstance().getConfigDir());
+	}
+
+	static void migrateOldFiles(Path dir) {
 		String[][] renames = {
 				{"shulkernames.json", "hoardeye.json"},
 				{"shulkernames-config.json", "hoardeye-config.json"},
