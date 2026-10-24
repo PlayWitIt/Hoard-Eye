@@ -84,9 +84,20 @@ public final class SelfTest {
 		tick++;
 		switch (tick) {
 			case 100 -> {
-				java.nio.file.Path config = net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir();
-				check("files saved as Container Peek are carried over to Hoard Eye", java.nio.file.Files.exists(config.resolve("hoardeye.json"))
-						&& !java.nio.file.Files.exists(config.resolve("containerpeek.json")) && !java.nio.file.Files.exists(config.resolve("containerpeek-config.json")));
+				// In a folder of its own, so it doesn't matter what the test's config folder had in it.
+				boolean carried = false;
+				try {
+					java.nio.file.Path old = java.nio.file.Files.createTempDirectory("hoardeye-migrate");
+					java.nio.file.Files.writeString(old.resolve("containerpeek.json"), "{\"saved\":1}");
+					java.nio.file.Files.writeString(old.resolve("containerpeek-config.json"), "{}");
+					HoardEyeClient.migrateOldFiles(old);
+					carried = java.nio.file.Files.readString(old.resolve("hoardeye.json")).contains("saved")
+							&& java.nio.file.Files.exists(old.resolve("hoardeye-config.json"))
+							&& !java.nio.file.Files.exists(old.resolve("containerpeek.json")) && !java.nio.file.Files.exists(old.resolve("containerpeek-config.json"));
+				} catch (java.io.IOException e) {
+					log("Migration test failed: " + e);
+				}
+				check("files saved as Container Peek are carried over to Hoard Eye", carried);
 				origin = client.player.getBlockPos();
 				ModConfig.INSTANCE.maxIcons = 27;
 				ModConfig.INSTANCE.iconsPerRow = 9;
