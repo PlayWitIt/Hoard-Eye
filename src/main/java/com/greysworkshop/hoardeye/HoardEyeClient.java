@@ -2,53 +2,52 @@ package com.greysworkshop.hoardeye;
 
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
+import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
-import net.fabricmc.fabric.api.client.rendering.v1.TooltipComponentCallback;
+import net.fabricmc.fabric.api.client.rendering.v1.ClientTooltipComponentCallback;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
-import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.ChestBlock;
-import net.minecraft.block.DoubleBlockProperties;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.ingame.CreativeInventoryScreen;
-import net.minecraft.client.gui.screen.ingame.HandledScreen;
-import net.minecraft.client.gui.screen.ingame.InventoryScreen;
-import net.minecraft.client.network.ServerInfo;
-import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.render.RenderTickCounter;
-import net.minecraft.client.util.InputUtil;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.type.ContainerComponent;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.inventory.CraftingResultInventory;
-import net.minecraft.item.ItemPlacementContext;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.screen.slot.Slot;
-import net.minecraft.text.Text;
-import net.minecraft.text.TranslatableTextContent;
-import net.minecraft.util.ActionResult;
-import net.minecraft.util.Formatting;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.collection.DefaultedList;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.DeltaTracker;
+import net.minecraft.client.KeyMapping;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen;
+import net.minecraft.client.gui.screens.inventory.InventoryScreen;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.multiplayer.ServerData;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.NonNullList;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.contents.TranslatableContents;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.ResultContainer;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.component.ItemContainerContents;
+import net.minecraft.world.item.context.BlockPlaceContext;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.ChestBlock;
+import net.minecraft.world.level.block.DoubleBlockCombiner;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.HitResult;
 import org.joml.Matrix3x2fStack;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
+import com.mojang.blaze3d.platform.InputConstants;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -75,9 +74,9 @@ public class HoardEyeClient implements ClientModInitializer {
 
 	private final NameStore store = new NameStore();
 
-	private KeyBinding toggleKey;
-	private KeyBinding configKey;
-	private KeyBinding searchKey;
+	private KeyMapping toggleKey;
+	private KeyMapping configKey;
+	private KeyMapping searchKey;
 
 	private Target pendingOpen;
 	private int pendingOpenTicks;
@@ -97,17 +96,17 @@ public class HoardEyeClient implements ClientModInitializer {
 		ModsPanel.install(panelEntry());
 		store.load();
 
-		KeyBinding.Category category = KeyBinding.Category.create(Identifier.of(MOD_ID, "main"));
-		toggleKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-				"key.hoardeye.toggle", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, category));
-		configKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-				"key.hoardeye.config", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, category));
-		searchKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-				"key.hoardeye.search", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_Y, category));
+		KeyMapping.Category category = KeyMapping.Category.register(Identifier.fromNamespaceAndPath(MOD_ID, "main"));
+		toggleKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+				"key.hoardeye.toggle", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, category));
+		configKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+				"key.hoardeye.config", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, category));
+		searchKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+				"key.hoardeye.search", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_Y, category));
 
 		UseBlockCallback.EVENT.register((player, world, hand, hit) -> {
-			if (!world.isClient() || !ModConfig.INSTANCE.enabled || !ModConfig.INSTANCE.rememberContainers) return ActionResult.PASS;
-			ClientWorld clientWorld = (ClientWorld) world;
+			if (!world.isClientSide() || !ModConfig.INSTANCE.enabled || !ModConfig.INSTANCE.rememberContainers) return InteractionResult.PASS;
+			ClientLevel clientWorld = (ClientLevel) world;
 
 			// Right-clicking a container might open it; remember which, so we can match the screen.
 			Target target = resolve(clientWorld, hit.getBlockPos());
@@ -117,46 +116,46 @@ public class HoardEyeClient implements ClientModInitializer {
 			}
 
 			// Right-clicking with a block item might place a container; remember where and what it holds.
-			ItemStack stack = player.getStackInHand(hand);
-			Block block = Block.getBlockFromItem(stack.getItem());
-			if (block != null && block.getDefaultState().hasBlockEntity()) {
-				Text name = stack.get(DataComponentTypes.CUSTOM_NAME);
-				DefaultedList<ItemStack> items = DefaultedList.ofSize(BOX_SLOTS, ItemStack.EMPTY);
-				stack.getOrDefault(DataComponentTypes.CONTAINER, ContainerComponent.DEFAULT).copyTo(items);
-				pendingPlace = new ItemPlacementContext(player, hand, stack, hit).getBlockPos();
+			ItemStack stack = player.getItemInHand(hand);
+			Block block = Block.byItem(stack.getItem());
+			if (block != null && block.defaultBlockState().hasBlockEntity()) {
+				Component name = stack.get(DataComponents.CUSTOM_NAME);
+				NonNullList<ItemStack> items = NonNullList.withSize(BOX_SLOTS, ItemStack.EMPTY);
+				stack.getOrDefault(DataComponents.CONTAINER, ItemContainerContents.EMPTY).copyInto(items);
+				pendingPlace = new BlockPlaceContext(player, hand, stack, hit).getClickedPos();
 				pendingPlaceBlock = block;
 				pendingPlaceName = name == null ? "" : name.getString();
 				pendingPlaceItems = items;
 				pendingPlaceTicks = PENDING_TICKS;
 			}
-			return ActionResult.PASS;
+			return InteractionResult.PASS;
 		});
 
 		ScreenEvents.AFTER_INIT.register((client, screen, width, height) -> {
-			if (!(screen instanceof HandledScreen<?> handled) || pendingOpen == null) return;
-			if (screen instanceof InventoryScreen || screen instanceof CreativeInventoryScreen) return;
+			if (!(screen instanceof AbstractContainerScreen<?> handled) || pendingOpen == null) return;
+			if (screen instanceof InventoryScreen || screen instanceof CreativeModeInventoryScreen) return;
 			String world = worldKey(client);
-			if (world == null || client.world == null) return;
+			if (world == null || client.level == null) return;
 			Target target = pendingOpen;
 			String name = titleToName(screen.getTitle());
 			pendingOpen = null;
-			String block = blockId(client.world, target);
+			String block = blockId(client.level, target);
 			// A fetch-route stop: show what to take, and head on to the next stop.
 			Fetch.Stop stop = Locator.routeStopAt(target.dimension(), target.pos());
 			if (stop != null) {
 				Fetch.onOpened(stop);
 				Locator.advanceRoute();
-				ScreenEvents.afterRender(screen).register((s, context, mouseX, mouseY, delta) -> Fetch.renderInScreen(handled, context));
+				ScreenEvents.afterExtract(screen).register((s, context, mouseX, mouseY, delta) -> Fetch.renderInScreen(handled, context));
 			}
-			store.put(world, target.dimension(), target.pos(), name, null, client.world.getRegistryManager(), block, target.kind());
+			store.put(world, target.dimension(), target.pos(), name, null, client.level.registryAccess(), block, target.kind());
 			store.saveIfDirty();
 
 			// Slots fill in after the screen opens, so read the contents when it closes.
 			ScreenEvents.remove(screen).register(closed -> {
 				Fetch.onClosed();
-				if (client.world == null || !world.equals(worldKey(client))) return;
-				List<ItemStack> items = containerStacks(handled.getScreenHandler());
-				store.put(world, target.dimension(), target.pos(), name, items, client.world.getRegistryManager(), block, target.kind());
+				if (client.level == null || !world.equals(worldKey(client))) return;
+				List<ItemStack> items = containerStacks(handled.getMenu());
+				store.put(world, target.dimension(), target.pos(), name, items, client.level.registryAccess(), block, target.kind());
 				store.saveIfDirty();
 			});
 		});
@@ -170,14 +169,13 @@ public class HoardEyeClient implements ClientModInitializer {
 			store.saveIfDirty();
 		}));
 
-		TooltipComponentCallback.EVENT.register(data ->
+		ClientTooltipComponentCallback.EVENT.register(data ->
 				data instanceof ShulkerPreview.Data preview ? new ShulkerPreview.Component(preview) : null);
 
 		HudElementRegistry.attachElementAfter(VanillaHudElements.CROSSHAIR,
-				Identifier.of(MOD_ID, "name_label"), this::renderHud);
+				Identifier.fromNamespaceAndPath(MOD_ID, "name_label"), this::renderHud);
 		// After chat, so markers aren't hidden behind recent messages.
-		HudElementRegistry.attachElementAfter(VanillaHudElements.CHAT, Identifier.of(MOD_ID, "locator"), Locator::renderHud);
-		WorldRenderEvents.BEFORE_DEBUG_RENDER.register(Locator::renderWorld);
+		HudElementRegistry.attachElementAfter(VanillaHudElements.CHAT, Identifier.fromNamespaceAndPath(MOD_ID, "locator"), Locator::renderHud);
 
 		// Scripted development test (./gradlew runSelfTest); the class isn't shipped in the release jar.
 		if (Boolean.getBoolean("hoardeye.selftest")) {
@@ -217,51 +215,52 @@ public class HoardEyeClient implements ClientModInitializer {
 		}
 	}
 
-	private void tick(MinecraftClient client) {
-		while (configKey.wasPressed()) {
-			client.setScreen(new ConfigScreen(client.currentScreen));
+	private void tick(Minecraft client) {
+		while (configKey.consumeClick()) {
+			client.gui.setScreen(new ConfigScreen(client.gui.screen()));
 		}
-		while (searchKey.wasPressed()) {
-			if (client.world != null && worldKey(client) != null) client.setScreen(new SearchScreen());
+		while (searchKey.consumeClick()) {
+			if (client.level != null && worldKey(client) != null) client.gui.setScreen(new SearchScreen());
 		}
-		while (toggleKey.wasPressed()) {
+		while (toggleKey.consumeClick()) {
 			ModConfig.INSTANCE.enabled = !ModConfig.INSTANCE.enabled;
 			ModConfig.save();
 			if (client.player != null) {
-				client.player.sendMessage(Text.translatable(ModConfig.INSTANCE.enabled
-						? "hoardeye.toggled_on" : "hoardeye.toggled_off"), true);
+				client.player.sendOverlayMessage(Component.translatable(ModConfig.INSTANCE.enabled
+						? "hoardeye.toggled_on" : "hoardeye.toggled_off"));
 			}
 		}
 
 		Locator.tick(client);
-		if (client.world == null || !ModConfig.INSTANCE.enabled) return;
+		Locator.emitWorldMarkers(client);
+		if (client.level == null || !ModConfig.INSTANCE.enabled) return;
 		// Once, after you've opened a few containers, mention the search so it gets found.
 		if (!ModConfig.INSTANCE.seenHint && ++hintTimer % 100 == 0 && worldKey(client) != null
 				&& store.world(worldKey(client)).values().stream().mapToInt(Map::size).sum() >= 3) {
 			ModConfig.INSTANCE.seenHint = true;
 			ModConfig.save();
-			client.inGameHud.getChatHud().addMessage(Text.empty()
-					.append(Text.literal("[Hoard Eye] ").formatted(Formatting.GOLD))
-					.append(Text.literal("Tip: press ").formatted(Formatting.GRAY))
-					.append(searchKey.getBoundKeyLocalizedText().copy().formatted(Formatting.AQUA))
-					.append(Text.literal(" to search everything in your containers and get walked to it.").formatted(Formatting.GRAY)));
+			client.gui.hud.getChat().addClientSystemMessage(Component.empty()
+					.append(Component.literal("[Hoard Eye] ").withStyle(ChatFormatting.GOLD))
+					.append(Component.literal("Tip: press ").withStyle(ChatFormatting.GRAY))
+					.append(searchKey.getTranslatedKeyMessage().copy().withStyle(ChatFormatting.AQUA))
+					.append(Component.literal(" to search everything in your containers and get walked to it.").withStyle(ChatFormatting.GRAY)));
 		}
 		String world = worldKey(client);
 		if (world == null) return;
-		String dimension = dimensionKey(client.world);
+		String dimension = dimensionKey(client.level);
 
 		if (pendingOpen != null && --pendingOpenTicks <= 0) pendingOpen = null;
 
 		if (pendingPlace != null) {
-			BlockState state = client.world.getBlockState(pendingPlace);
-			Target target = state.isOf(pendingPlaceBlock) ? resolve(client.world, pendingPlace) : null;
+			BlockState state = client.level.getBlockState(pendingPlace);
+			Target target = state.is(pendingPlaceBlock) ? resolve(client.level, pendingPlace) : null;
 			if (target != null) {
 				// A chest that joined another into a double chest keeps the other half's contents, so skip it.
 				boolean joinedDouble = state.getBlock() instanceof ChestBlock
-						&& ChestBlock.getDoubleBlockType(state) != DoubleBlockProperties.Type.SINGLE;
+						&& ChestBlock.getBlockType(state) != DoubleBlockCombiner.BlockType.SINGLE;
 				if (target.kind() != ContainerKind.ENDER_CHEST && !joinedDouble) {
 					store.put(world, target.dimension(), target.pos(), pendingPlaceName, pendingPlaceItems,
-							client.world.getRegistryManager(), blockId(client.world, target), target.kind());
+							client.level.registryAccess(), blockId(client.level, target), target.kind());
 					store.saveIfDirty();
 				}
 				pendingPlace = null;
@@ -277,16 +276,16 @@ public class HoardEyeClient implements ClientModInitializer {
 		if (ModConfig.INSTANCE.forgetBroken && ++cleanupTimer >= 20) {
 			cleanupTimer = 0;
 			Map<Long, NameStore.Entry> entries = store.dimension(world, dimension);
-			BlockPos aimed = client.crosshairTarget instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK
-					&& client.player.getEyePos().distanceTo(hit.getBlockPos().toCenterPos()) <= 6 ? hit.getBlockPos() : null;
+			BlockPos aimed = client.hitResult instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK
+					&& client.player.getEyePosition().distanceTo(Vec3.atCenterOf(hit.getBlockPos())) <= 6 ? hit.getBlockPos() : null;
 			Iterator<Map.Entry<Long, NameStore.Entry>> it = entries.entrySet().iterator();
 			while (it.hasNext()) {
-				BlockPos pos = BlockPos.fromLong(it.next().getKey());
+				BlockPos pos = BlockPos.of(it.next().getKey());
 				if (pos.equals(pendingPlace)) continue;
-				if (!client.world.isChunkLoaded(pos.getX() >> 4, pos.getZ() >> 4)) continue;
-				if (resolve(client.world, pos) != null) continue;
-				BlockState state = client.world.getBlockState(pos);
-				if (state.isAir() || !state.getFluidState().isEmpty() && !state.isSolidBlock(client.world, pos) || pos.equals(aimed)) {
+				if (!client.level.hasChunk(pos.getX() >> 4, pos.getZ() >> 4)) continue;
+				if (resolve(client.level, pos) != null) continue;
+				BlockState state = client.level.getBlockState(pos);
+				if (state.isAir() || !state.getFluidState().isEmpty() && !state.isRedstoneConductor(client.level, pos) || pos.equals(aimed)) {
 					it.remove();
 					store.markDirty();
 				}
@@ -295,57 +294,57 @@ public class HoardEyeClient implements ClientModInitializer {
 		}
 	}
 
-	private void renderHud(DrawContext context, RenderTickCounter tickCounter) {
+	private void renderHud(GuiGraphicsExtractor context, DeltaTracker tickCounter) {
 		ModConfig config = ModConfig.INSTANCE;
-		MinecraftClient client = MinecraftClient.getInstance();
-		if (!config.enabled || client.world == null || client.options.hudHidden || client.currentScreen != null) return;
-		if (!(client.crosshairTarget instanceof BlockHitResult hit) || hit.getType() != HitResult.Type.BLOCK) return;
-		Target target = resolve(client.world, hit.getBlockPos());
+		Minecraft client = Minecraft.getInstance();
+		if (!config.enabled || client.level == null || client.gui.hud.isHidden() || client.gui.screen() != null) return;
+		if (!(client.hitResult instanceof BlockHitResult hit) || hit.getType() != HitResult.Type.BLOCK) return;
+		Target target = resolve(client.level, hit.getBlockPos());
 		if (target == null || !config.isShown(target.kind())) return;
-		if (config.hideWhileSneaking && client.player.isSneaking()) return;
-		if (client.player.getEyePos().distanceTo(hit.getBlockPos().toCenterPos()) > config.maxDistance) return;
+		if (config.hideWhileSneaking && client.player.isShiftKeyDown()) return;
+		if (client.player.getEyePosition().distanceTo(Vec3.atCenterOf(hit.getBlockPos())) > config.maxDistance) return;
 		String world = worldKey(client);
 		if (world == null) return;
 
-		TextRenderer font = client.textRenderer;
-		Text line = null;
+		Font font = client.font;
+		Component line = null;
 		int lineColor = 0xFFFFFFFF;
 		ItemGrid grid = null;
 
 		NameStore.Entry entry = store.get(world, target.dimension(), target.pos());
 		if (entry == null) {
 			if (!config.showUnknownHint) return;
-			Text blockName = client.world.getBlockState(hit.getBlockPos()).getBlock().getName();
-			line = Text.translatable("hoardeye.unknown", blockName);
+			Component blockName = client.level.getBlockState(hit.getBlockPos()).getBlock().getName();
+			line = Component.translatable("hoardeye.unknown", blockName);
 			lineColor = 0xFFAAAAAA;
 		} else {
 			if (config.showNames && !entry.name.isEmpty()) {
-				line = Text.literal(entry.name);
+				line = Component.literal(entry.name);
 				lineColor = 0xFF000000 | config.nameColor.rgb;
 			}
-			List<ItemStack> stacks = config.showContents ? entry.stacks(client.world.getRegistryManager()) : null;
+			List<ItemStack> stacks = config.showContents ? entry.stacks(client.level.registryAccess()) : null;
 			if (stacks != null && !stacks.isEmpty()) {
 				grid = ItemGrid.of(stacks, config.maxIcons, Math.max(1, config.iconsPerRow), config.showMoreCount, font);
 			} else if (stacks != null && line == null) {
-				line = Text.translatable("hoardeye.empty");
+				line = Component.translatable("hoardeye.empty");
 				lineColor = 0xFFAAAAAA;
 			} else if (stacks != null) {
-				line = Text.empty().append(line).append(" ")
-						.append(Text.translatable("hoardeye.empty").formatted(Formatting.GRAY));
+				line = Component.empty().append(line).append(" ")
+						.append(Component.translatable("hoardeye.empty").withStyle(ChatFormatting.GRAY));
 			}
 		}
 		if (line == null && grid == null) return;
 
 		// Measure the label, then place it according to the chosen position.
-		int lineWidth = line != null ? font.getWidth(line) : 0;
+		int lineWidth = line != null ? font.width(line) : 0;
 		int gridWidth = grid != null ? grid.width() : 0;
 		int width = Math.max(lineWidth, gridWidth);
 		int height = (line != null ? 9 : 0) + (line != null && grid != null ? 2 : 0) + (grid != null ? grid.height() : 0);
 
 		HudPosition position = config.hudPosition != null ? config.hudPosition : HudPosition.BELOW_CROSSHAIR;
 		float scale = config.scalePercent / 100f;
-		float screenW = context.getScaledWindowWidth();
-		float screenH = context.getScaledWindowHeight();
+		float screenW = context.guiWidth();
+		float screenH = context.guiHeight();
 		float w = width * scale;
 		float h = height * scale;
 		int off = config.yOffset;
@@ -363,7 +362,7 @@ public class HoardEyeClient implements ClientModInitializer {
 			case BOTTOM_LEFT, BOTTOM_RIGHT -> screenH - off - h;
 		};
 
-		Matrix3x2fStack matrices = context.getMatrices();
+		Matrix3x2fStack matrices = context.pose();
 		matrices.pushMatrix();
 		matrices.translate(Math.round(x), Math.round(y));
 		matrices.scale(scale, scale);
@@ -373,7 +372,7 @@ public class HoardEyeClient implements ClientModInitializer {
 		}
 		int lineY = 0;
 		if (line != null) {
-			context.drawTextWithShadow(font, line, position.align(width, lineWidth), lineY, lineColor);
+			context.text(font, line, position.align(width, lineWidth), lineY, lineColor);
 			lineY += 11;
 		}
 		if (grid != null) {
@@ -390,13 +389,13 @@ public class HoardEyeClient implements ClientModInitializer {
 		/** A little wider than an item, so 3-digit counts don't run into their neighbours. */
 		private static final int CELL = 20;
 
-		static ItemGrid of(List<ItemStack> stacks, int maxIcons, int perRow, boolean showMore, TextRenderer font) {
+		static ItemGrid of(List<ItemStack> stacks, int maxIcons, int perRow, boolean showMore, Font font) {
 			List<ItemStack> groups = new ArrayList<>();
 			List<Integer> totals = new ArrayList<>();
 			outer:
 			for (ItemStack stack : stacks) {
 				for (int i = 0; i < groups.size(); i++) {
-					if (ItemStack.areItemsAndComponentsEqual(groups.get(i), stack)) {
+					if (ItemStack.isSameItemSameComponents(groups.get(i), stack)) {
 						totals.set(i, totals.get(i) + stack.getCount());
 						continue outer;
 					}
@@ -408,7 +407,7 @@ public class HoardEyeClient implements ClientModInitializer {
 			int shown = Math.min(groups.size(), maxIcons);
 			int extra = groups.size() - shown;
 			String more = extra > 0 && showMore ? "+" + extra : null;
-			int moreWidth = more != null ? font.getWidth(more) + 2 : 0;
+			int moreWidth = more != null ? font.width(more) + 2 : 0;
 			return new ItemGrid(groups.subList(0, shown), totals.subList(0, shown), perRow, more, moreWidth);
 		}
 
@@ -438,19 +437,19 @@ public class HoardEyeClient implements ClientModInitializer {
 			return rows() * CELL - 2;
 		}
 
-		void draw(DrawContext context, TextRenderer font, HudPosition position, int labelWidth, int y) {
+		void draw(GuiGraphicsExtractor context, Font font, HudPosition position, int labelWidth, int y) {
 			for (int row = 0; row < rows(); row++) {
 				int x = position.align(labelWidth, rowWidth(row));
 				int end = Math.min(groups.size(), (row + 1) * perRow);
 				for (int i = row * perRow; i < end; i++) {
 					ItemStack stack = groups.get(i);
 					int total = totals.get(i);
-					context.drawItem(stack, x, y);
-					context.drawStackOverlay(font, stack, x, y, total > 1 ? count(total) : null);
+					context.item(stack, x, y);
+					context.itemDecorations(font, stack, x, y, total > 1 ? count(total) : null);
 					x += CELL;
 				}
 				if (row == rows() - 1 && more != null) {
-					context.drawTextWithShadow(font, more, x + 2, y + 4, 0xFFAAAAAA);
+					context.text(font, more, x + 2, y + 4, 0xFFAAAAAA);
 				}
 				y += CELL;
 			}
@@ -463,15 +462,15 @@ public class HoardEyeClient implements ClientModInitializer {
 	 * broken or replaced is forgotten; a chest that joins or leaves a double chest keeps what it held, under the
 	 * spot the pair is now kept by.
 	 */
-	public void blockChanged(ClientWorld world, BlockPos pos, BlockState state) {
-		MinecraftClient client = MinecraftClient.getInstance();
+	public void blockChanged(ClientLevel world, BlockPos pos, BlockState state) {
+		Minecraft client = Minecraft.getInstance();
 		String key = worldKey(client);
 		if (key == null || !ModConfig.INSTANCE.enabled) return;
 		String dimension = dimensionKey(world);
 		BlockState old = world.getBlockState(pos);
 		// Chests pairing up: the pair is kept under its lower spot.
-		if (state.getBlock() instanceof ChestBlock && ChestBlock.getDoubleBlockType(state) != DoubleBlockProperties.Type.SINGLE) {
-			BlockPos other = pos.offset(ChestBlock.getFacing(state));
+		if (state.getBlock() instanceof ChestBlock && ChestBlock.getBlockType(state) != DoubleBlockCombiner.BlockType.SINGLE) {
+			BlockPos other = pos.relative(ChestBlock.getConnectedDirection(state));
 			BlockPos keep = other.asLong() < pos.asLong() ? other : pos;
 			store.move(key, dimension, keep.equals(pos) ? other : pos, keep);
 			store.saveIfDirty();
@@ -480,8 +479,8 @@ public class HoardEyeClient implements ClientModInitializer {
 		if (old.getBlock() == state.getBlock() || !ModConfig.INSTANCE.forgetBroken) return;
 		if (ContainerKind.of(world.getBlockEntity(pos)) == null) return;
 		// Half of a double chest broken: the other half is a single chest now, kept under its own spot.
-		if (old.getBlock() instanceof ChestBlock && ChestBlock.getDoubleBlockType(old) != DoubleBlockProperties.Type.SINGLE) {
-			BlockPos other = pos.offset(ChestBlock.getFacing(old));
+		if (old.getBlock() instanceof ChestBlock && ChestBlock.getBlockType(old) != DoubleBlockCombiner.BlockType.SINGLE) {
+			BlockPos other = pos.relative(ChestBlock.getConnectedDirection(old));
 			if (pos.asLong() < other.asLong()) store.move(key, dimension, pos, other);
 		} else {
 			store.forget(key, dimension, pos);
@@ -493,32 +492,32 @@ public class HoardEyeClient implements ClientModInitializer {
 	 * Works out where the container at {@code pos} is stored, or returns null if it isn't a container.
 	 * Both halves of a double chest share one entry, and all ender chests share one entry.
 	 */
-	private static Target resolve(ClientWorld world, BlockPos pos) {
+	private static Target resolve(ClientLevel world, BlockPos pos) {
 		ContainerKind kind = ContainerKind.of(world.getBlockEntity(pos));
 		if (kind == null) return null;
-		if (kind == ContainerKind.ENDER_CHEST) return new Target(kind, ENDER_DIMENSION, BlockPos.ORIGIN);
+		if (kind == ContainerKind.ENDER_CHEST) return new Target(kind, ENDER_DIMENSION, BlockPos.ZERO);
 
 		BlockState state = world.getBlockState(pos);
-		if (state.getBlock() instanceof ChestBlock && ChestBlock.getDoubleBlockType(state) != DoubleBlockProperties.Type.SINGLE) {
-			BlockPos other = pos.offset(ChestBlock.getFacing(state));
+		if (state.getBlock() instanceof ChestBlock && ChestBlock.getBlockType(state) != DoubleBlockCombiner.BlockType.SINGLE) {
+			BlockPos other = pos.relative(ChestBlock.getConnectedDirection(state));
 			if (other.asLong() < pos.asLong()) pos = other;
 		}
-		return new Target(kind, dimensionKey(world), pos.toImmutable());
+		return new Target(kind, dimensionKey(world), pos.immutable());
 	}
 
 	/** The container's own slots from an open screen, leaving out the player's inventory and crafter output. */
-	private static List<ItemStack> containerStacks(ScreenHandler handler) {
+	private static List<ItemStack> containerStacks(AbstractContainerMenu handler) {
 		List<ItemStack> items = new ArrayList<>();
 		for (Slot slot : handler.slots) {
-			if (slot.inventory instanceof PlayerInventory || slot.inventory instanceof CraftingResultInventory) continue;
-			items.add(slot.getStack().copy());
+			if (slot.container instanceof Inventory || slot.container instanceof ResultContainer) continue;
+			items.add(slot.getItem().copy());
 		}
 		return items;
 	}
 
 	/** A default title (like "Chest" or "Furnace") means the container is unnamed; anything else is a custom name. */
-	private static String titleToName(Text title) {
-		if (title.getContent() instanceof TranslatableTextContent t
+	private static String titleToName(Component title) {
+		if (title.getContents() instanceof TranslatableContents t
 				&& (t.getKey().startsWith("container.") || t.getKey().startsWith("block."))) {
 			return "";
 		}
@@ -535,20 +534,20 @@ public class HoardEyeClient implements ClientModInitializer {
 	}
 
 	/** Identifies the server (by address, tidied up) or singleplayer world (by folder name). */
-	public static String worldKey(MinecraftClient client) {
-		ServerInfo server = client.getCurrentServerEntry();
-		if (server != null) return "server:" + normalizeAddress(server.address);
-		if (client.getServer() != null) return "local:" + client.getServer().getSaveProperties().getLevelName();
+	public static String worldKey(Minecraft client) {
+		ServerData server = client.getCurrentServer();
+		if (server != null) return "server:" + normalizeAddress(server.ip);
+		if (client.getSingleplayerServer() != null) return "local:" + client.getSingleplayerServer().getWorldData().getLevelName();
 		return null;
 	}
 
-	private static String blockId(ClientWorld world, Target target) {
+	private static String blockId(ClientLevel world, Target target) {
 		if (target.kind() == ContainerKind.ENDER_CHEST) return "minecraft:ender_chest";
-		return Registries.BLOCK.getId(world.getBlockState(target.pos()).getBlock()).toString();
+		return BuiltInRegistries.BLOCK.getKey(world.getBlockState(target.pos()).getBlock()).toString();
 	}
 
-	public static String dimensionKey(ClientWorld world) {
-		return world.getRegistryKey().getValue().toString();
+	public static String dimensionKey(ClientLevel world) {
+		return world.dimension().identifier().toString();
 	}
 
 	/** This mod's part of the mods panel (Right Shift on the title screen): the switches worth flipping before joining. */
@@ -558,23 +557,23 @@ public class HoardEyeClient implements ClientModInitializer {
 		String version = net.fabricmc.loader.api.FabricLoader.getInstance().getModContainer(MOD_ID)
 				.map(m -> m.getMetadata().getVersion().getFriendlyString()).orElse("?").replaceAll("\\+.*", "");
 		java.util.List<java.util.Map<String, Object>> switches = java.util.List.of(
-				master(ModsPanel.toggle(Text.translatable(P + ".enabled"), Text.translatable(P + ".enabled.desc"), () -> c.enabled, v -> c.enabled = v)),
+				master(ModsPanel.toggle(Component.translatable(P + ".enabled"), Component.translatable(P + ".enabled.desc"), () -> c.enabled, v -> c.enabled = v)),
 				ModsPanel.section("Remembering"),
-				ModsPanel.toggle(Text.translatable(P + ".remember"), Text.translatable(P + ".remember.desc"), () -> c.rememberContainers, v -> c.rememberContainers = v),
-				ModsPanel.toggle(Text.translatable(P + ".forget_broken"), Text.translatable(P + ".forget_broken.desc"), () -> c.forgetBroken, v -> c.forgetBroken = v),
+				ModsPanel.toggle(Component.translatable(P + ".remember"), Component.translatable(P + ".remember.desc"), () -> c.rememberContainers, v -> c.rememberContainers = v),
+				ModsPanel.toggle(Component.translatable(P + ".forget_broken"), Component.translatable(P + ".forget_broken.desc"), () -> c.forgetBroken, v -> c.forgetBroken = v),
 				ModsPanel.section("Label"),
-				ModsPanel.toggle(Text.translatable(P + ".show_names"), Text.translatable(P + ".show_names.desc"), () -> c.showNames, v -> c.showNames = v),
-				ModsPanel.toggle(Text.translatable(P + ".show_contents"), Text.translatable(P + ".show_contents.desc"), () -> c.showContents, v -> c.showContents = v),
-				ModsPanel.toggle(Text.translatable(P + ".show_unknown_hint"), Text.translatable(P + ".show_unknown_hint.desc"), () -> c.showUnknownHint, v -> c.showUnknownHint = v),
+				ModsPanel.toggle(Component.translatable(P + ".show_names"), Component.translatable(P + ".show_names.desc"), () -> c.showNames, v -> c.showNames = v),
+				ModsPanel.toggle(Component.translatable(P + ".show_contents"), Component.translatable(P + ".show_contents.desc"), () -> c.showContents, v -> c.showContents = v),
+				ModsPanel.toggle(Component.translatable(P + ".show_unknown_hint"), Component.translatable(P + ".show_unknown_hint.desc"), () -> c.showUnknownHint, v -> c.showUnknownHint = v),
 				ModsPanel.section("Shulker boxes"),
-				ModsPanel.toggle(Text.translatable(P + ".shulker_tooltip"), Text.translatable(P + ".shulker_tooltip.desc"), () -> c.shulkerTooltip, v -> c.shulkerTooltip = v),
-				ModsPanel.toggle(Text.translatable(P + ".shulker_shift"), Text.translatable(P + ".shulker_shift.desc"), () -> c.shulkerTooltipShiftOnly, v -> c.shulkerTooltipShiftOnly = v),
+				ModsPanel.toggle(Component.translatable(P + ".shulker_tooltip"), Component.translatable(P + ".shulker_tooltip.desc"), () -> c.shulkerTooltip, v -> c.shulkerTooltip = v),
+				ModsPanel.toggle(Component.translatable(P + ".shulker_shift"), Component.translatable(P + ".shulker_shift.desc"), () -> c.shulkerTooltipShiftOnly, v -> c.shulkerTooltipShiftOnly = v),
 				ModsPanel.section("Finding"),
-				ModsPanel.toggle(Text.translatable(P + ".locator_markers"), Text.translatable(P + ".locator_markers.desc"), () -> c.locatorMarkers, v -> c.locatorMarkers = v),
-				ModsPanel.toggle(Text.translatable(P + ".locator_beam"), Text.translatable(P + ".locator_beam.desc"), () -> c.locatorBeam, v -> c.locatorBeam = v),
-				ModsPanel.toggle(Text.translatable(P + ".found_sound"), Text.translatable(P + ".found_sound.desc"), () -> c.foundSound, v -> c.foundSound = v));
-		return java.util.Map.of("id", MOD_ID, "name", "Hoard Eye", "version", version, "icon", Identifier.of(MOD_ID, "icon.png"),
-				"settings", (java.util.function.Function<net.minecraft.client.gui.screen.Screen, net.minecraft.client.gui.screen.Screen>) ConfigScreen::new,
+				ModsPanel.toggle(Component.translatable(P + ".locator_markers"), Component.translatable(P + ".locator_markers.desc"), () -> c.locatorMarkers, v -> c.locatorMarkers = v),
+				ModsPanel.toggle(Component.translatable(P + ".locator_beam"), Component.translatable(P + ".locator_beam.desc"), () -> c.locatorBeam, v -> c.locatorBeam = v),
+				ModsPanel.toggle(Component.translatable(P + ".found_sound"), Component.translatable(P + ".found_sound.desc"), () -> c.foundSound, v -> c.foundSound = v));
+		return java.util.Map.of("id", MOD_ID, "name", "Hoard Eye", "version", version, "icon", Identifier.fromNamespaceAndPath(MOD_ID, "icon.png"),
+				"settings", (java.util.function.Function<net.minecraft.client.gui.screens.Screen, net.minecraft.client.gui.screens.Screen>) ConfigScreen::new,
 				"save", (Runnable) ModConfig::save, "data", java.util.List.of("hoardeye.json", "hoardeye-config.json", "hoardeye-fetch.json"), "switches", switches);
 	}
 

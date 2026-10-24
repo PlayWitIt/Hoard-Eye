@@ -1,9 +1,9 @@
 package com.greysworkshop.hoardeye;
 
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.client.gui.screen.ConfirmScreen;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.text.Text;
+import net.minecraft.client.gui.screens.ConfirmScreen;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.Component;
 import net.minecraft.util.Util;
 
 import java.util.List;
@@ -14,7 +14,7 @@ public class ConfigScreen extends OptionsScreen {
 	private static final String P = "hoardeye.config";
 
 	public ConfigScreen(Screen parent) {
-		super(parent, Text.translatable(P + ".title"), P);
+		super(parent, Component.translatable(P + ".title"), P);
 	}
 
 	@Override
@@ -44,67 +44,67 @@ public class ConfigScreen extends OptionsScreen {
 					r.slider("icons_per_row", 1, 27, () -> c.iconsPerRow, v -> c.iconsPerRow = v, String::valueOf);
 					r.toggle("show_more", () -> c.showMoreCount, v -> c.showMoreCount = v);
 					r.cycle("count_format", ModConfig.CountFormat.values(), () -> c.countFormat, v -> c.countFormat = v,
-							v -> Text.translatable(P + ".count_format." + v.name().toLowerCase(Locale.ROOT)));
+							v -> Component.translatable(P + ".count_format." + v.name().toLowerCase(Locale.ROOT)));
 					r.header("header.look");
 					r.cycle("name_color", ModConfig.NameColor.values(), () -> c.nameColor, v -> c.nameColor = v,
-							v -> Text.translatable(P + ".name_color." + v.name().toLowerCase(Locale.ROOT)).styled(s -> s.withColor(v.rgb)));
+							v -> Component.translatable(P + ".name_color." + v.name().toLowerCase(Locale.ROOT)).withStyle(s -> s.withColor(v.rgb)));
 					r.toggle("background", () -> c.labelBackground, v -> c.labelBackground = v);
 					r.slider("background_opacity", 10, 100, () -> c.backgroundOpacity, v -> c.backgroundOpacity = v, v -> v + "%");
 					r.header("header.when");
 					r.slider("max_distance", 2, 64, () -> c.maxDistance, v -> c.maxDistance = v,
-							v -> Text.translatable(P + ".blocks", v).getString());
+							v -> Component.translatable(P + ".blocks", v).getString());
 					r.toggle("hide_sneaking", () -> c.hideWhileSneaking, v -> c.hideWhileSneaking = v);
 				}),
 				new Tab("containers", r -> {
-					r.note(Text.translatable(P + ".containers_note"));
+					r.note(Component.translatable(P + ".containers_note"));
 					r.button("show_all", () -> {
 						for (ContainerKind kind : ContainerKind.values()) c.setShown(kind, true);
-						clearAndInit();
+						rebuildWidgets();
 					});
 					r.button("hide_all", () -> {
 						for (ContainerKind kind : ContainerKind.values()) c.setShown(kind, false);
-						clearAndInit();
+						rebuildWidgets();
 					});
 					for (ContainerKind kind : ContainerKind.values()) {
-						r.toggle(kind.getName(), Text.translatable(P + ".kind.desc", kind.getName()),
+						r.toggle(kind.getName(), Component.translatable(P + ".kind.desc", kind.getName()),
 								() -> c.isShown(kind), v -> c.setShown(kind, v));
 					}
 				}),
 				new Tab("search", r -> {
-					r.note(Text.translatable(P + ".search_note"));
+					r.note(Component.translatable(P + ".search_note"));
 					r.header("header.locator");
 					r.toggle("locator_markers", () -> c.locatorMarkers, v -> c.locatorMarkers = v);
 					r.toggle("locator_beam", () -> c.locatorBeam, v -> c.locatorBeam = v);
 					r.slider("beam_height", 16, 256, () -> c.beamHeight, v -> c.beamHeight = v / 8 * 8,
-							v -> Text.translatable(P + ".blocks", v / 8 * 8).getString());
+							v -> Component.translatable(P + ".blocks", v / 8 * 8).getString());
 					r.slider("locator_reach", 2, 10, () -> c.locatorReach, v -> c.locatorReach = v,
-							v -> Text.translatable(P + ".blocks", v).getString());
+							v -> Component.translatable(P + ".blocks", v).getString());
 					r.cycle("strip_position", ModConfig.StripPosition.values(), () -> c.stripPosition, v -> c.stripPosition = v,
-							v -> Text.translatable(P + ".strip_position." + v.name().toLowerCase(Locale.ROOT)));
+							v -> Component.translatable(P + ".strip_position." + v.name().toLowerCase(Locale.ROOT)));
 					r.toggle("found_sound", () -> c.foundSound, v -> c.foundSound = v);
 				}),
 				new Tab("data", r -> {
-					r.note(Text.translatable(P + ".data_note"));
-					r.button("forget_world", () -> confirm(Text.translatable(P + ".forget_world.confirm"), () -> {
-						String world = HoardEyeClient.worldKey(client);
+					r.note(Component.translatable(P + ".data_note"));
+					r.button("forget_world", () -> confirm(Component.translatable(P + ".forget_world.confirm"), () -> {
+						String world = HoardEyeClient.worldKey(minecraft);
 						if (world != null) {
 							HoardEyeClient.INSTANCE.store().clearWorld(world);
 							HoardEyeClient.INSTANCE.store().saveIfDirty();
 						}
 					}));
-					r.button("forget_all", () -> confirm(Text.translatable(P + ".forget_all.confirm"), () -> {
+					r.button("forget_all", () -> confirm(Component.translatable(P + ".forget_all.confirm"), () -> {
 						HoardEyeClient.INSTANCE.store().clearAll();
 						HoardEyeClient.INSTANCE.store().saveIfDirty();
 					}));
-					r.button("open_folder", () -> Util.getOperatingSystem().open(FabricLoader.getInstance().getConfigDir()));
+					r.button("open_folder", () -> Util.getPlatform().openPath(FabricLoader.getInstance().getConfigDir()));
 				}));
 	}
 
-	private void confirm(Text message, Runnable action) {
-		client.setScreen(new ConfirmScreen(yes -> {
+	private void confirm(Component message, Runnable action) {
+		minecraft.gui.setScreen(new ConfirmScreen(yes -> {
 			if (yes) action.run();
-			client.setScreen(this);
-		}, Text.translatable(P + ".are_you_sure"), message));
+			minecraft.gui.setScreen(this);
+		}, Component.translatable(P + ".are_you_sure"), message));
 	}
 
 	@Override

@@ -8,10 +8,9 @@ import com.google.gson.reflect.TypeToken;
 import com.mojang.serialization.DynamicOps;
 import com.mojang.serialization.JsonOps;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.RegistryWrapper;
-import net.minecraft.util.math.BlockPos;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.world.item.ItemStack;
 import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
@@ -42,9 +41,9 @@ public final class NameStore {
 		/** Decoded {@link #items}, filled lazily for rendering. */
 		public transient List<ItemStack> decoded;
 
-		public List<ItemStack> stacks(RegistryWrapper.WrapperLookup registries) {
+		public List<ItemStack> stacks(HolderLookup.Provider registries) {
 			if (decoded == null && items != null) {
-				DynamicOps<JsonElement> ops = registries.getOps(JsonOps.INSTANCE);
+				DynamicOps<JsonElement> ops = registries.createSerializationContext(JsonOps.INSTANCE);
 				decoded = new ArrayList<>();
 				for (JsonElement json : items) {
 					ItemStack.CODEC.parse(ops, json).result().ifPresent(decoded::add);
@@ -136,14 +135,14 @@ public final class NameStore {
 
 	/** Records a box's name and type, and its contents if {@code stacks} is non-null. */
 	public void put(String world, String dimension, BlockPos pos, String name, List<ItemStack> stacks,
-			RegistryWrapper.WrapperLookup registries, String block, ContainerKind kind) {
+			HolderLookup.Provider registries, String block, ContainerKind kind) {
 		Entry entry = dimension(world, dimension).computeIfAbsent(pos.asLong(), k -> new Entry());
 		entry.name = name;
 		entry.block = block;
 		entry.kind = kind.name();
 		if (stacks != null) {
 			entry.updated = System.currentTimeMillis();
-			DynamicOps<JsonElement> ops = registries.getOps(JsonOps.INSTANCE);
+			DynamicOps<JsonElement> ops = registries.createSerializationContext(JsonOps.INSTANCE);
 			entry.items = new ArrayList<>();
 			for (ItemStack stack : stacks) {
 				if (stack.isEmpty()) continue;

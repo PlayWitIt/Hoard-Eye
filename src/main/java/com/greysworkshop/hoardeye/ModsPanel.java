@@ -3,8 +3,9 @@ package com.greysworkshop.hoardeye;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
+import com.mojang.blaze3d.platform.InputConstants;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
+import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
@@ -12,30 +13,29 @@ import net.fabricmc.fabric.api.client.screen.v1.ScreenKeyboardEvents;
 import net.fabricmc.fabric.api.client.screen.v1.Screens;
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.loader.api.ObjectShare;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gl.RenderPipelines;
-import net.minecraft.client.gui.Click;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.GameMenuScreen;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.screen.TitleScreen;
-import net.minecraft.client.gui.screen.multiplayer.MultiplayerScreen;
-import net.minecraft.client.gui.screen.world.SelectWorldScreen;
-import net.minecraft.client.gui.tooltip.Tooltip;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.TextFieldWidget;
-import net.minecraft.client.input.KeyInput;
-import net.minecraft.client.network.ServerInfo;
-import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.option.ServerList;
-import net.minecraft.client.sound.PositionedSoundInstance;
-import net.minecraft.client.util.InputUtil;
-import net.minecraft.sound.SoundEvents;
-import net.minecraft.text.OrderedText;
-import net.minecraft.text.Text;
-import net.minecraft.text.TranslatableTextContent;
-import net.minecraft.util.Formatting;
-import net.minecraft.util.Identifier;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.KeyMapping;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.Tooltip;
+import net.minecraft.client.gui.screens.PauseScreen;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.TitleScreen;
+import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen;
+import net.minecraft.client.gui.screens.worldselection.SelectWorldScreen;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.multiplayer.ServerData;
+import net.minecraft.client.multiplayer.ServerList;
+import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.client.resources.sounds.SimpleSoundInstance;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.contents.TranslatableContents;
+import net.minecraft.resources.Identifier;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.util.Util;
 import org.lwjgl.glfw.GLFW;
 
@@ -92,7 +92,7 @@ public final class ModsPanel extends Screen {
 	private double scroll;
 	private int maxScroll;
 	private final List<Hit> hits = new ArrayList<>();
-	private TextFieldWidget nameField;
+	private EditBox nameField;
 	private String status;
 	private int statusColor = GREY;
 	/** The profile whose servers are being picked. */
@@ -117,7 +117,7 @@ public final class ModsPanel extends Screen {
 	}
 
 	private ModsPanel(Screen parent) {
-		super(Text.literal("Mods panel"));
+		super(Component.literal("Mods panel"));
 		this.parent = parent;
 		this.mods = entries();
 		for (int i = 0; i < pages(); i++) {
@@ -150,7 +150,7 @@ public final class ModsPanel extends Screen {
 		Map<String, Object> mod = mods.get(picked);
 		for (Object o : list(mod.get("switches"))) {
 			if (o instanceof Map<?, ?> row && row.get("label") != null && (label.equals(String.valueOf(row.get("label")))
-					|| row.get("label") instanceof Text t && t.getContent() instanceof TranslatableTextContent tr && tr.getKey().endsWith("." + label))) {
+					|| row.get("label") instanceof Component t && t.getContents() instanceof TranslatableContents tr && tr.getKey().endsWith("." + label))) {
 				@SuppressWarnings("unchecked") Consumer<Boolean> set = (Consumer<Boolean>) row.get("set");
 				flip(mod, (BooleanSupplier) row.get("get"), set);
 				return true;
@@ -191,17 +191,17 @@ public final class ModsPanel extends Screen {
 		entries().add(entry);
 		if (version(share.get(OWNER)) < VERSION) share.put(OWNER, ME);
 		ScreenEvents.AFTER_INIT.register((client, screen, w, h) -> {
-			if (!owned() || !(screen instanceof TitleScreen || screen instanceof MultiplayerScreen || screen instanceof SelectWorldScreen
-					|| screen instanceof GameMenuScreen)) return;
+			if (!owned() || !(screen instanceof TitleScreen || screen instanceof JoinMultiplayerScreen || screen instanceof SelectWorldScreen
+					|| screen instanceof PauseScreen)) return;
 			if (screen instanceof TitleScreen) {
-				Screens.getButtons(screen).add(ButtonWidget.builder(Text.literal("Mods panel"), b -> client.setScreen(new ModsPanel(screen)))
-						.dimensions(4, 4, 80, 20).tooltip(Tooltip.of(Text.literal("Turn your mods' features on or off before you join a world. Right Shift opens it too.")))
+				Screens.getWidgets(screen).add(Button.builder(Component.literal("Mods panel"), b -> client.gui.setScreen(new ModsPanel(screen)))
+						.bounds(4, 4, 80, 20).tooltip(Tooltip.create(Component.literal("Turn your mods' features on or off before you join a world. Right Shift opens it too.")))
 						.build());
 			}
 			ScreenKeyboardEvents.allowKeyPress(screen).register((s, key) -> {
 				// Not while typing (Right Shift makes capitals in the world search box).
-				if (key.key() != GLFW.GLFW_KEY_RIGHT_SHIFT || s.getFocused() instanceof TextFieldWidget) return true;
-				client.setScreen(new ModsPanel(s));
+				if (key.key() != GLFW.GLFW_KEY_RIGHT_SHIFT || s.getFocused() instanceof EditBox) return true;
+				client.gui.setScreen(new ModsPanel(s));
 				return false;
 			});
 		});
@@ -217,20 +217,20 @@ public final class ModsPanel extends Screen {
 		share.putIfAbsent(KEY_OWNER, ME);
 		if (ME.equals(share.get(KEY_OWNER))) {
 			share.put(STREAM_SAFE, Files.exists(streamSafeFile()));
-			KeyBinding key = KeyBindingHelper.registerKeyBinding(new KeyBinding("key.playwit.stream_safe", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_F7,
-					KeyBinding.Category.create(Identifier.of("playwit", "mods"))));
+			KeyMapping key = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.playwit.stream_safe", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F7,
+					KeyMapping.Category.register(Identifier.fromNamespaceAndPath("playwit", "mods"))));
 			ClientTickEvents.END_CLIENT_TICK.register(client -> {
-				while (key.wasPressed()) {
+				while (key.consumeClick()) {
 					setStreamSafe(!streamSafe());
-					if (client.player != null) client.inGameHud.setOverlayMessage(Text.literal(streamSafe() ? "Stream-safe on: coordinates hidden"
-							: "Stream-safe off").formatted(streamSafe() ? Formatting.GREEN : Formatting.YELLOW), false);
+					if (client.player != null) client.gui.hud.setOverlayMessage(Component.literal(streamSafe() ? "Stream-safe on: coordinates hidden"
+							: "Stream-safe off").withStyle(streamSafe() ? ChatFormatting.GREEN : ChatFormatting.YELLOW), false);
 				}
 			});
-			HudElementRegistry.addLast(Identifier.of("playwit", "stream_safe"), (context, tickCounter) -> {
-				MinecraftClient client = MinecraftClient.getInstance();
-				if (!streamSafe() || client.options.hudHidden) return;
+			HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("playwit", "stream_safe"), (context, tickCounter) -> {
+				Minecraft client = Minecraft.getInstance();
+				if (!streamSafe() || client.gui.hud.isHidden()) return;
 				String label = "● stream-safe";
-				context.drawText(client.textRenderer, label, (context.getScaledWindowWidth() - client.textRenderer.getWidth(label)) / 2, 2, 0x8866DD88, false);
+				context.text(client.font, label, (context.guiWidth() - client.font.width(label)) / 2, 2, 0x8866DD88, false);
 			});
 		}
 	}
@@ -275,12 +275,12 @@ public final class ModsPanel extends Screen {
 			HoardEyeClient.LOGGER.warn("Could not save stream-safe mode", e);
 		}
 		// The debug screen (F3) shows coordinates too: the game's own "reduced debug info" hides them.
-		var reduced = MinecraftClient.getInstance().options.getReducedDebugInfo();
+		var reduced = Minecraft.getInstance().options.reducedDebugInfo();
 		if (on && reducedBefore == null) {
-			reducedBefore = reduced.getValue();
-			reduced.setValue(true);
+			reducedBefore = reduced.get();
+			reduced.set(true);
 		} else if (!on && reducedBefore != null) {
-			reduced.setValue(reducedBefore);
+			reduced.set(reducedBefore);
 			reducedBefore = null;
 		}
 	}
@@ -314,8 +314,8 @@ public final class ModsPanel extends Screen {
 	/** A switch's lasting name: its translation key, else its label. */
 	private static String key(Object modId, Map<?, ?> row) {
 		Object label = row.get("label");
-		String k = label instanceof Text t && t.getContent() instanceof TranslatableTextContent tr ? tr.getKey()
-				: label instanceof Text t ? t.getString() : String.valueOf(label);
+		String k = label instanceof Component t && t.getContents() instanceof TranslatableContents tr ? tr.getKey()
+				: label instanceof Component t ? t.getString() : String.valueOf(label);
 		return modId + "/" + k;
 	}
 
@@ -355,17 +355,17 @@ public final class ModsPanel extends Screen {
 		return a.endsWith(":25565") ? a.substring(0, a.length() - 6) : a;
 	}
 
-	private static void applyForServer(MinecraftClient client) {
-		ServerInfo entry = client.getCurrentServerEntry();
-		if (entry == null || entry.isLocal()) return;
-		String here = server(entry.address);
+	private static void applyForServer(Minecraft client) {
+		ServerData entry = client.getCurrentServer();
+		if (entry == null || entry.isLan()) return;
+		String here = server(entry.ip);
 		for (Profile p : loadProfiles()) {
 			if (p.servers.stream().map(ModsPanel::server).noneMatch(here::equals)) continue;
 			int changed = apply(p);
-			client.inGameHud.getChatHud().addMessage(Text.literal("[Mods panel] ").formatted(Formatting.GOLD)
-					.append(Text.literal("Profile \"" + p.name + "\" for this server: "
+			client.gui.hud.getChat().addClientSystemMessage(Component.literal("[Mods panel] ").withStyle(ChatFormatting.GOLD)
+					.append(Component.literal("Profile \"" + p.name + "\" for this server: "
 							+ (changed == 0 ? "everything was already set." : changed + (changed == 1 ? " switch" : " switches") + " changed."))
-							.formatted(Formatting.GRAY)));
+							.withStyle(ChatFormatting.GRAY)));
 			return;
 		}
 	}
@@ -374,15 +374,15 @@ public final class ModsPanel extends Screen {
 	private List<String[]> savedServers() {
 		List<String[]> out = new ArrayList<>();
 		try {
-			ServerList list = new ServerList(client);
-			list.loadFile();
-			for (int i = 0; i < list.size(); i++) out.add(new String[] {list.get(i).name, list.get(i).address});
+			ServerList list = new ServerList(minecraft);
+			list.load();
+			for (int i = 0; i < list.size(); i++) out.add(new String[] {list.get(i).name, list.get(i).ip});
 		} catch (RuntimeException e) {
 			HoardEyeClient.LOGGER.warn("Could not read the server list", e);
 		}
-		ServerInfo current = client.getCurrentServerEntry();
-		if (current != null && !current.isLocal() && out.stream().noneMatch(s -> server(s[1]).equals(server(current.address)))) {
-			out.add(0, new String[] {current.name, current.address});
+		ServerData current = minecraft.getCurrentServer();
+		if (current != null && !current.isLan() && out.stream().noneMatch(s -> server(s[1]).equals(server(current.ip)))) {
+			out.add(0, new String[] {current.name, current.ip});
 		}
 		return out;
 	}
@@ -407,18 +407,18 @@ public final class ModsPanel extends Screen {
 
 	@Override
 	protected void init() {
-		String typed = nameField == null ? "" : nameField.getText();
-		nameField = new TextFieldWidget(textRenderer, 0, 0, 120, 18, Text.literal("Profile name"));
+		String typed = nameField == null ? "" : nameField.getValue();
+		nameField = new EditBox(font, 0, 0, 120, 18, Component.literal("Profile name"));
 		nameField.setMaxLength(32);
-		nameField.setPlaceholder(Text.literal("Name, e.g. Anarchy").formatted(Formatting.DARK_GRAY));
-		nameField.setText(typed);
-		addSelectableChild(nameField);
+		nameField.setHint(Component.literal("Name, e.g. Anarchy").withStyle(ChatFormatting.DARK_GRAY));
+		nameField.setValue(typed);
+		addWidget(nameField);
 	}
 
 	// ---- Drawing ----
 
-	private static Text text(Object o) {
-		return o instanceof Text t ? t : Text.literal(String.valueOf(o));
+	private static Component text(Object o) {
+		return o instanceof Component t ? t : Component.literal(String.valueOf(o));
 	}
 
 	private int panelW() {
@@ -430,30 +430,30 @@ public final class ModsPanel extends Screen {
 	}
 
 	/** A small button; returns its width. */
-	private int button(DrawContext context, String label, int x, int y, int mouseX, int mouseY, int top, int bottom, boolean primary, Runnable run) {
-		int w = textRenderer.getWidth(label) + 12;
+	private int button(GuiGraphicsExtractor context, String label, int x, int y, int mouseX, int mouseY, int top, int bottom, boolean primary, Runnable run) {
+		int w = font.width(label) + 12;
 		boolean over = mouseX >= x && mouseX < x + w && mouseY >= y && mouseY < y + 16 && mouseY >= top && mouseY < bottom;
 		context.fill(x, y, x + w, y + 16, primary ? (over ? 0xFFFFB84D : ACCENT) : over ? BUTTON_HOVER : BUTTON);
-		context.drawText(textRenderer, label, x + 6, y + 4, primary ? 0xFF0F1111 : TEXT, false);
+		context.text(font, label, x + 6, y + 4, primary ? 0xFF0F1111 : TEXT, false);
 		if (y + 16 > top && y < bottom) hits.add(new Hit(x, Math.max(y, top), x + w, Math.min(y + 16, bottom), run));
 		return w;
 	}
 
 	@Override
-	public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-		super.render(context, mouseX, mouseY, delta);
+	public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
+		super.extractRenderState(context, mouseX, mouseY, delta);
 		hits.clear();
 		int w = panelW(), h = panelH(), x = (width - w) / 2, y = (height - h) / 2;
 		context.fill(x - 1, y - 1, x + w + 1, y + h + 1, EDGE);
 		context.fill(x, y, x + w, y + h, PANEL);
 
 		// Header.
-		context.drawText(textRenderer, Text.literal("Mods panel").styled(s -> s.withBold(true)), x + 10, y + 10, TEXT, false);
+		context.text(font, Component.literal("Mods panel").withStyle(s -> s.withBold(true)), x + 10, y + 10, TEXT, false);
 		String hint = "Right Shift or Esc to close";
 		boolean overClose = mouseX >= x + w - 22 && mouseX < x + w - 4 && mouseY >= y + 5 && mouseY < y + 23;
-		if (textRenderer.getWidth(hint) + 120 < w) context.drawText(textRenderer, hint, x + w - 28 - textRenderer.getWidth(hint), y + 10, GREY, false);
-		context.drawText(textRenderer, "×", x + w - 16, y + 10, overClose ? TEXT : GREY, false);
-		hits.add(new Hit(x + w - 22, y + 5, x + w - 4, y + 23, this::close));
+		if (font.width(hint) + 120 < w) context.text(font, hint, x + w - 28 - font.width(hint), y + 10, GREY, false);
+		context.text(font, "×", x + w - 16, y + 10, overClose ? TEXT : GREY, false);
+		hits.add(new Hit(x + w - 22, y + 5, x + w - 4, y + 23, this::onClose));
 		context.fill(x, y + HEADER, x + w, y + HEADER + 1, EDGE);
 
 		// The pages down the side: each mod, then profiles and backups; stream-safe mode at the bottom.
@@ -470,20 +470,20 @@ public final class ModsPanel extends Screen {
 			int icon = Math.min(24, rowH - 6), iy = ry + (rowH - icon) / 2;
 			if (i < mods.size()) {
 				Map<String, Object> mod = mods.get(i);
-				if (mod.get("icon") instanceof Identifier id) context.drawTexture(RenderPipelines.GUI_TEXTURED, id, x + 8, iy, 0, 0, icon, icon, icon, icon);
+				if (mod.get("icon") instanceof Identifier id) context.blit(RenderPipelines.GUI_TEXTURED, id, x + 8, iy, 0, 0, icon, icon, icon, icon);
 				boolean off = !masterOn(mod);
-				String name = textRenderer.trimToWidth(String.valueOf(mod.get("name")), SIDEBAR - 44);
+				String name = font.plainSubstrByWidth(String.valueOf(mod.get("name")), SIDEBAR - 44);
 				if (rowH >= 28) {
-					context.drawText(textRenderer, name, x + 38, ry + rowH / 2 - 10, off ? GREY : TEXT, false);
-					context.drawText(textRenderer, off ? "Turned off" : "v" + mod.get("version"), x + 38, ry + rowH / 2 + 1, off ? RED : DIM, false);
+					context.text(font, name, x + 38, ry + rowH / 2 - 10, off ? GREY : TEXT, false);
+					context.text(font, off ? "Turned off" : "v" + mod.get("version"), x + 38, ry + rowH / 2 + 1, off ? RED : DIM, false);
 				} else {
-					context.drawText(textRenderer, name, x + 38, ry + rowH / 2 - 4, off ? RED : TEXT, false);
+					context.text(font, name, x + 38, ry + rowH / 2 - 4, off ? RED : TEXT, false);
 				}
 			} else {
 				boolean profiles = i == profilesPage();
 				context.fill(x + 8, iy, x + 8 + icon, iy + icon, BUTTON);
-				context.drawCenteredTextWithShadow(textRenderer, profiles ? "☰" : "⟲", x + 8 + icon / 2, iy + icon / 2 - 4, ACCENT);
-				context.drawText(textRenderer, profiles ? "Profiles" : "Backups", x + 38, ry + rowH / 2 - 4, TEXT, false);
+				context.centeredText(font, profiles ? "☰" : "⟲", x + 8 + icon / 2, iy + icon / 2 - 4, ACCENT);
+				context.text(font, profiles ? "Profiles" : "Backups", x + 38, ry + rowH / 2 - 4, TEXT, false);
 			}
 			int index = i;
 			hits.add(new Hit(x, ry, x + SIDEBAR, ry + rowH, () -> pick(index)));
@@ -492,7 +492,7 @@ public final class ModsPanel extends Screen {
 		context.fill(x, sy, x + SIDEBAR, sy + 1, EDGE);
 		boolean safe = streamSafe(), overSafe = mouseX >= x && mouseX < x + SIDEBAR && mouseY >= sy && mouseY < y + h;
 		if (overSafe) context.fill(x, sy + 1, x + SIDEBAR, y + h, HOVER);
-		context.drawText(textRenderer, "Stream-safe", x + 10, sy + 9, safe ? TEXT : GREY, false);
+		context.text(font, "Stream-safe", x + 10, sy + 9, safe ? TEXT : GREY, false);
 		drawSwitch(context, x + SIDEBAR - 36, sy + 7, safe);
 		hits.add(new Hit(x, sy, x + SIDEBAR, y + h, () -> {
 			setStreamSafe(!streamSafe());
@@ -506,23 +506,23 @@ public final class ModsPanel extends Screen {
 		else renderBackups(context, lx, top, lw, y + h, mouseX, mouseY);
 
 		if (mouseX >= x && mouseX < x + SIDEBAR && mouseY >= sy && mouseY < y + h) {
-			context.drawOrderedTooltip(textRenderer, textRenderer.wrapLines(Text.literal("Hides coordinates in all your PlayWit mods (and F3) while you record or stream. "
+			context.setTooltipForNextFrame(font, font.split(Component.literal("Hides coordinates in all your PlayWit mods (and F3) while you record or stream. "
 					+ "Key: " + streamKeyName() + " in game."), 200), mouseX, mouseY);
 		}
 	}
 
 	private static String streamKeyName() {
-		return KeyBinding.byId("key.playwit.stream_safe") instanceof KeyBinding k ? k.getBoundKeyLocalizedText().getString() : "F7";
+		return KeyMapping.get("key.playwit.stream_safe") instanceof KeyMapping k ? k.getTranslatedKeyMessage().getString() : "F7";
 	}
 
-	private void scrollbar(DrawContext context, int lx, int lw, int listTop, int listBottom) {
+	private void scrollbar(GuiGraphicsExtractor context, int lx, int lw, int listTop, int listBottom) {
 		if (maxScroll <= 0) return;
 		int track = listBottom - listTop, bar = Math.max(20, track * track / (track + maxScroll));
 		int by = listTop + (int) ((track - bar) * (scroll / maxScroll));
 		context.fill(lx + lw - 3, by, lx + lw - 1, by + bar, EDGE);
 	}
 
-	private void renderMod(DrawContext context, Map<String, Object> mod, int lx, int listTop, int lw, int bottom, int mouseX, int mouseY) {
+	private void renderMod(GuiGraphicsExtractor context, Map<String, Object> mod, int lx, int listTop, int lw, int bottom, int mouseX, int mouseY) {
 		int listBottom = bottom - FOOTER, textW = lw - 20 - 40;
 		context.enableScissor(lx, listTop, lx + lw, listBottom);
 		int ry = listTop + 6 - (int) scroll;
@@ -531,20 +531,20 @@ public final class ModsPanel extends Screen {
 			if (!(o instanceof Map<?, ?> row)) continue;
 			if (row.get("section") != null) {
 				ry += 6;
-				context.drawText(textRenderer, String.valueOf(row.get("section")).toUpperCase(Locale.ROOT), lx + 10, ry, ACCENT, false);
+				context.text(font, String.valueOf(row.get("section")).toUpperCase(Locale.ROOT), lx + 10, ry, ACCENT, false);
 				ry += 13;
 				continue;
 			}
 			if (!(row.get("get") instanceof BooleanSupplier get) || !(row.get("set") instanceof Consumer<?> set)) continue;
-			List<OrderedText> tip = row.get("tip") == null ? List.of() : textRenderer.wrapLines(text(row.get("tip")), textW);
+			List<FormattedCharSequence> tip = row.get("tip") == null ? List.of() : font.split(text(row.get("tip")), textW);
 			int rh = 8 + 10 + tip.size() * 10 + 6;
 			boolean value = get.getAsBoolean(), dim = masterOff && !Boolean.TRUE.equals(row.get("master"));
 			boolean over = mouseX >= lx && mouseX < lx + lw && mouseY >= Math.max(ry, listTop) && mouseY < Math.min(ry + rh, listBottom);
 			if (over) context.fill(lx + 4, ry, lx + lw - 4, ry + rh, HOVER);
-			context.drawText(textRenderer, text(row.get("label")), lx + 10, ry + 8, dim ? GREY : TEXT, false);
+			context.text(font, text(row.get("label")), lx + 10, ry + 8, dim ? GREY : TEXT, false);
 			int ty = ry + 19;
-			for (OrderedText line : tip) {
-				context.drawText(textRenderer, line, lx + 10, ty, dim ? DIM : GREY, false);
+			for (FormattedCharSequence line : tip) {
+				context.text(font, line, lx + 10, ty, dim ? DIM : GREY, false);
 				ty += 10;
 			}
 			drawSwitch(context, lx + lw - 38, ry + 8, value);
@@ -562,25 +562,25 @@ public final class ModsPanel extends Screen {
 		// Footer: the full settings.
 		context.fill(lx, listBottom, lx + lw, listBottom + 1, EDGE);
 		String all = "All " + mod.get("name") + " settings  ›", saved = "Saved as you click";
-		if (textRenderer.getWidth(all) + 16 > lw - 16) all = "All settings  ›";
-		int bw = textRenderer.getWidth(all) + 16, bx = lx + lw - bw - 8, by = listBottom + 6;
+		if (font.width(all) + 16 > lw - 16) all = "All settings  ›";
+		int bw = font.width(all) + 16, bx = lx + lw - bw - 8, by = listBottom + 6;
 		boolean overAll = mouseX >= bx && mouseX < bx + bw && mouseY >= by && mouseY < by + 18;
 		context.fill(bx, by, bx + bw, by + 18, overAll ? 0xFFFFB84D : ACCENT);
-		context.drawText(textRenderer, all, bx + 8, by + 5, 0xFF0F1111, false);
+		context.text(font, all, bx + 8, by + 5, 0xFF0F1111, false);
 		hits.add(new Hit(bx, by, bx + bw, by + 18, () -> openSettings(mod)));
-		if (lx + 10 + textRenderer.getWidth(saved) + 8 <= bx) context.drawText(textRenderer, saved, lx + 10, by + 5, DIM, false);
+		if (lx + 10 + font.width(saved) + 8 <= bx) context.text(font, saved, lx + 10, by + 5, DIM, false);
 	}
 
 	/** Wrapped grey text; returns the y below it. */
-	private int para(DrawContext context, String s, int x, int y, int w, int color) {
-		for (OrderedText line : textRenderer.wrapLines(Text.literal(s), w)) {
-			context.drawText(textRenderer, line, x, y, color, false);
+	private int para(GuiGraphicsExtractor context, String s, int x, int y, int w, int color) {
+		for (FormattedCharSequence line : font.split(Component.literal(s), w)) {
+			context.text(font, line, x, y, color, false);
 			y += 10;
 		}
 		return y;
 	}
 
-	private void renderProfiles(DrawContext context, int lx, int listTop, int lw, int bottom, int mouseX, int mouseY, float delta) {
+	private void renderProfiles(GuiGraphicsExtractor context, int lx, int listTop, int lw, int bottom, int mouseX, int mouseY, float delta) {
 		List<Profile> profiles = loadProfiles();
 		int listBottom = bottom - FOOTER, cw = lw - 20;
 		context.enableScissor(lx, listTop, lx + lw, listBottom);
@@ -591,7 +591,7 @@ public final class ModsPanel extends Screen {
 		for (Profile p : profiles) {
 			boolean open = p.name.equals(openProfile);
 			int cardTop = ry;
-			context.drawText(textRenderer, Text.literal(p.name).styled(s -> s.withBold(true)), lx + 10, ry + 6, TEXT, false);
+			context.text(font, Component.literal(p.name).withStyle(s -> s.withBold(true)), lx + 10, ry + 6, TEXT, false);
 			String used = p.servers.isEmpty() ? "Not used on any server yet" : "Used on " + String.join(", ", p.servers);
 			ry = para(context, used, lx + 10, ry + 18, cw, p.servers.isEmpty() ? DIM : GREY);
 			int bx = lx + 10;
@@ -630,7 +630,7 @@ public final class ModsPanel extends Screen {
 					boolean over = mouseX >= lx + 10 && mouseX < lx + lw - 10 && mouseY >= ry && mouseY < ry + 14 && mouseY >= listTop && mouseY < listBottom;
 					if (over) context.fill(lx + 10, ry, lx + lw - 10, ry + 14, HOVER);
 					context.fill(lx + 18, ry + 3, lx + 26, ry + 11, in ? ON : OFF);
-					context.drawText(textRenderer, textRenderer.trimToWidth(s[0] + "  ·  " + s[1], cw - 30), lx + 32, ry + 3, in ? TEXT : GREY, false);
+					context.text(font, font.plainSubstrByWidth(s[0] + "  ·  " + s[1], cw - 30), lx + 32, ry + 3, in ? TEXT : GREY, false);
 					if (ry + 14 > listTop && ry < listBottom) hits.add(new Hit(lx + 10, Math.max(ry, listTop), lx + lw - 10, Math.min(ry + 14, listBottom), () -> {
 						// A server uses one profile: picking it here takes it off any other.
 						List<Profile> all = loadProfiles();
@@ -657,17 +657,17 @@ public final class ModsPanel extends Screen {
 		context.fill(lx, listBottom, lx + lw, listBottom + 1, EDGE);
 		int by = listBottom + 6;
 		String save = "Save current switches";
-		int sw = textRenderer.getWidth(save) + 12;
+		int sw = font.width(save) + 12;
 		nameField.setX(lx + 10);
 		nameField.setY(by);
 		nameField.setWidth(Math.max(60, lw - 30 - sw));
-		nameField.render(context, mouseX, mouseY, delta);
+		nameField.extractRenderState(context, mouseX, mouseY, delta);
 		button(context, save, lx + lw - 10 - sw, by + 1, mouseX, mouseY, by, by + 18, true, this::saveNewProfile);
 		drawStatus(context, lx, lw, listBottom);
 	}
 
 	private void saveNewProfile() {
-		String name = nameField.getText().strip();
+		String name = nameField.getValue().strip();
 		if (name.isEmpty()) {
 			say("Type a name for the profile first.", RED);
 			setFocused(nameField);
@@ -682,12 +682,12 @@ public final class ModsPanel extends Screen {
 		}
 		p.switches = snapshot();
 		saveProfiles(all);
-		nameField.setText("");
+		nameField.setValue("");
 		openProfile = p.name;
 		say("Saved \"" + p.name + "\". Pick the servers it's for.", ON);
 	}
 
-	private void renderBackups(DrawContext context, int lx, int listTop, int lw, int bottom, int mouseX, int mouseY) {
+	private void renderBackups(GuiGraphicsExtractor context, int lx, int listTop, int lw, int bottom, int mouseX, int mouseY) {
 		if (backupList == null) backupList = PanelData.list();
 		int listBottom = bottom - FOOTER, cw = lw - 20;
 		context.enableScissor(lx, listTop, lx + lw, listBottom);
@@ -705,13 +705,13 @@ public final class ModsPanel extends Screen {
 				size = 0;
 			}
 			boolean pending = PanelData.restorePendingFor(file);
-			context.drawText(textRenderer, textRenderer.trimToWidth(name, cw - 150), lx + 10, ry + 4, TEXT, false);
-			context.drawText(textRenderer, pending ? "Restores when you restart" : String.format(Locale.ROOT, "%.1f MB", size / 1048576.0),
+			context.text(font, font.plainSubstrByWidth(name, cw - 150), lx + 10, ry + 4, TEXT, false);
+			context.text(font, pending ? "Restores when you restart" : String.format(Locale.ROOT, "%.1f MB", size / 1048576.0),
 					lx + 10, ry + 15, pending ? ACCENT : DIM, false);
 			String restore = "restore:" + file, delete = "delete:" + file;
 			int bx = lx + lw - 10;
 			String dl = delete.equals(confirm) ? "Sure? Delete" : "Delete";
-			bx -= textRenderer.getWidth(dl) + 12;
+			bx -= font.width(dl) + 12;
 			button(context, dl, bx, ry + 4, mouseX, mouseY, listTop, listBottom, false, () -> {
 				if (!delete.equals(confirm)) {
 					confirm = delete;
@@ -728,7 +728,7 @@ public final class ModsPanel extends Screen {
 				backupList = null;
 			});
 			String rl = pending ? "Cancel restore" : restore.equals(confirm) ? "Sure? Restore" : "Restore";
-			bx -= textRenderer.getWidth(rl) + 16;
+			bx -= font.width(rl) + 16;
 			button(context, rl, bx, ry + 4, mouseX, mouseY, listTop, listBottom, !pending && restore.equals(confirm), () -> {
 				try {
 					if (pending) {
@@ -757,16 +757,16 @@ public final class ModsPanel extends Screen {
 		context.fill(lx, listBottom, lx + lw, listBottom + 1, EDGE);
 		int by = listBottom + 6, bx = lx + lw - 10;
 		String now = backingUp ? "Backing up…" : "Back up now", folder = "Open folder";
-		bx -= textRenderer.getWidth(now) + 12;
+		bx -= font.width(now) + 12;
 		button(context, now, bx, by + 1, mouseX, mouseY, by, by + 18, true, this::backUpNow);
-		bx -= textRenderer.getWidth(folder) + 16;
+		bx -= font.width(folder) + 16;
 		button(context, folder, bx, by + 1, mouseX, mouseY, by, by + 18, false, () -> {
 			try {
 				Files.createDirectories(PanelData.backups());
 			} catch (IOException ignored) {
 				// Opened anyway.
 			}
-			Util.getOperatingSystem().open(PanelData.backups());
+			Util.getPlatform().openPath(PanelData.backups());
 		});
 		drawStatus(context, lx, lw, listBottom);
 	}
@@ -786,12 +786,12 @@ public final class ModsPanel extends Screen {
 		backingUp = true;
 		List<String> paths = dataPaths();
 		say("Backing up…", GREY);
-		Util.getIoWorkerExecutor().execute(() -> {
+		Util.ioPool().execute(() -> {
 			try {
 				int n = PanelData.backUp(paths, PanelData.newBackupFile(null));
-				client.execute(() -> say("Backed up " + n + (n == 1 ? " file." : " files."), ON));
+				minecraft.execute(() -> say("Backed up " + n + (n == 1 ? " file." : " files."), ON));
 			} catch (IOException e) {
-				client.execute(() -> say("Couldn't back up: " + e.getMessage(), RED));
+				minecraft.execute(() -> say("Couldn't back up: " + e.getMessage(), RED));
 			} finally {
 				backingUp = false;
 				backupList = null;
@@ -806,14 +806,14 @@ public final class ModsPanel extends Screen {
 	}
 
 	/** The latest message, just above the footer. */
-	private void drawStatus(DrawContext context, int lx, int lw, int listBottom) {
+	private void drawStatus(GuiGraphicsExtractor context, int lx, int lw, int listBottom) {
 		if (status == null) return;
-		String s = textRenderer.trimToWidth(status, lw - 20);
+		String s = font.plainSubstrByWidth(status, lw - 20);
 		context.fill(lx, listBottom - 14, lx + lw, listBottom, PANEL);
-		context.drawText(textRenderer, s, lx + 10, listBottom - 11, statusColor, false);
+		context.text(font, s, lx + 10, listBottom - 11, statusColor, false);
 	}
 
-	private static void drawSwitch(DrawContext context, int x, int y, boolean on) {
+	private static void drawSwitch(GuiGraphicsExtractor context, int x, int y, boolean on) {
 		context.fill(x, y, x + 26, y + 12, on ? ON : OFF);
 		int k = on ? x + 15 : x + 1;
 		context.fill(k, y + 1, k + 10, y + 11, 0xFFF4F6F8);
@@ -833,7 +833,7 @@ public final class ModsPanel extends Screen {
 	// ---- Input ----
 
 	private void click() {
-		MinecraftClient.getInstance().getSoundManager().play(PositionedSoundInstance.ui(SoundEvents.UI_BUTTON_CLICK, 1f));
+		Minecraft.getInstance().getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1f));
 	}
 
 	private void pick(int index) {
@@ -857,11 +857,11 @@ public final class ModsPanel extends Screen {
 	private void openSettings(Map<String, Object> mod) {
 		if (!(mod.get("settings") instanceof Function<?, ?> f)) return;
 		click();
-		client.setScreen(((Function<Screen, Screen>) f).apply(this));
+		minecraft.gui.setScreen(((Function<Screen, Screen>) f).apply(this));
 	}
 
 	@Override
-	public boolean mouseClicked(Click click, boolean doubled) {
+	public boolean mouseClicked(MouseButtonEvent click, boolean doubled) {
 		if (click.button() == 0) {
 			for (Hit hit : List.copyOf(hits)) {
 				if (hit.has(click.x(), click.y())) {
@@ -882,14 +882,14 @@ public final class ModsPanel extends Screen {
 	}
 
 	@Override
-	public boolean keyPressed(KeyInput input) {
+	public boolean keyPressed(KeyEvent input) {
 		boolean typing = getFocused() == nameField && nameField.visible;
 		if (typing && (input.key() == GLFW.GLFW_KEY_ENTER || input.key() == GLFW.GLFW_KEY_KP_ENTER)) {
 			saveNewProfile();
 			return true;
 		}
 		if (!typing && input.key() == GLFW.GLFW_KEY_RIGHT_SHIFT) {
-			close();
+			onClose();
 			return true;
 		}
 		if (!typing && (input.key() == GLFW.GLFW_KEY_UP || input.key() == GLFW.GLFW_KEY_DOWN)) {
@@ -900,12 +900,12 @@ public final class ModsPanel extends Screen {
 	}
 
 	@Override
-	public void close() {
-		client.setScreen(parent);
+	public void onClose() {
+		minecraft.gui.setScreen(parent);
 	}
 
 	@Override
-	public boolean shouldPause() {
-		return parent instanceof GameMenuScreen;
+	public boolean isPauseScreen() {
+		return parent instanceof PauseScreen;
 	}
 }

@@ -1,24 +1,5 @@
 package com.greysworkshop.hoardeye;
 
-import net.minecraft.block.Block;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.Click;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.TextFieldWidget;
-import net.minecraft.client.input.KeyInput;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.type.ContainerComponent;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
-import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
 import org.joml.Matrix3x2fStack;
 import org.lwjgl.glfw.GLFW;
 
@@ -30,6 +11,25 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.component.ItemContainerContents;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Storage search: every item in every container you've opened, searchable and sortable, with a locator to
@@ -116,11 +116,11 @@ public class SearchScreen extends Screen {
 	private int totalItems;
 	private int totalKinds;
 
-	private TextFieldWidget search;
-	private ButtonWidget findButton;
-	private ButtonWidget allButton;
-	private ButtonWidget stopButton;
-	private ButtonWidget fetchButton;
+	private EditBox search;
+	private Button findButton;
+	private Button allButton;
+	private Button stopButton;
+	private Button fetchButton;
 	private ItemStack hoveredStack = ItemStack.EMPTY;
 	private int hoverX;
 	private int hoverY;
@@ -131,17 +131,17 @@ public class SearchScreen extends Screen {
 	private int leftX0, leftX1, rightX0, rightX1;
 
 	public SearchScreen() {
-		super(Text.translatable("hoardeye.search.title"));
+		super(Component.translatable("hoardeye.search.title"));
 	}
 
 	// ---- Data ----
 
 	private void loadBoxes() {
 		allBoxes.clear();
-		MinecraftClient mc = MinecraftClient.getInstance();
+		Minecraft mc = Minecraft.getInstance();
 		String worldKey = HoardEyeClient.worldKey(mc);
-		if (worldKey == null || mc.world == null) return;
-		ClientWorld world = mc.world;
+		if (worldKey == null || mc.level == null) return;
+		ClientLevel world = mc.level;
 		String here = HoardEyeClient.dimensionKey(world);
 		Set<String> kinds = new HashSet<>();
 		totalItems = 0;
@@ -149,9 +149,9 @@ public class SearchScreen extends Screen {
 		for (var dim : HoardEyeClient.INSTANCE.store().world(worldKey).entrySet()) {
 			for (var e : dim.getValue().entrySet()) {
 				NameStore.Entry entry = e.getValue();
-				List<ItemStack> stacks = entry.stacks(world.getRegistryManager());
+				List<ItemStack> stacks = entry.stacks(world.registryAccess());
 				if (stacks == null) continue;
-				BlockPos pos = BlockPos.fromLong(e.getKey());
+				BlockPos pos = BlockPos.of(e.getKey());
 				String dimension = dim.getKey();
 
 				String blockId = entry.block;
@@ -159,16 +159,16 @@ public class SearchScreen extends Screen {
 				if (dimension.equals(ENDER)) {
 					blockId = "minecraft:ender_chest";
 					kind = ContainerKind.ENDER_CHEST;
-				} else if (blockId == null && dimension.equals(here) && world.isChunkLoaded(pos.getX() >> 4, pos.getZ() >> 4)) {
+				} else if (blockId == null && dimension.equals(here) && world.hasChunk(pos.getX() >> 4, pos.getZ() >> 4)) {
 					// Older entries didn't record their block; look it up if we can.
-					blockId = Registries.BLOCK.getId(world.getBlockState(pos).getBlock()).toString();
+					blockId = BuiltInRegistries.BLOCK.getKey(world.getBlockState(pos).getBlock()).toString();
 					kind = ContainerKind.of(world.getBlockEntity(pos));
 				}
-				Block block = blockId != null ? Registries.BLOCK.get(Identifier.tryParse(blockId)) : null;
+				Block block = blockId != null ? BuiltInRegistries.BLOCK.getValue(Identifier.tryParse(blockId)) : null;
 				ItemStack icon = block != null && block.asItem() != Items.AIR ? new ItemStack(block.asItem()) : new ItemStack(Items.CHEST);
 				String label = !entry.name.isEmpty() ? entry.name
 						: block != null && block.asItem() != Items.AIR ? block.getName().getString()
-						: Text.translatable("hoardeye.search.container").getString();
+						: Component.translatable("hoardeye.search.container").getString();
 
 				int items = 0;
 				StringBuilder itemText = new StringBuilder();
@@ -176,9 +176,9 @@ public class SearchScreen extends Screen {
 					items += stack.getCount();
 					appendText(itemText, stack);
 					kinds.add(key(stack));
-					ContainerComponent inner = stack.get(DataComponentTypes.CONTAINER);
+					ItemContainerContents inner = stack.get(DataComponents.CONTAINER);
 					if (inner != null) {
-						inner.streamNonEmpty().forEach(s -> {
+						inner.nonEmptyItemCopyStream().forEach(s -> {
 							appendText(itemText, s);
 							kinds.add(key(s));
 						});
@@ -186,7 +186,7 @@ public class SearchScreen extends Screen {
 				}
 				totalItems += items;
 				double distance = dimension.equals(here) && mc.player != null
-						? Math.sqrt(mc.player.squaredDistanceTo(Vec3d.ofCenter(pos))) : Double.MAX_VALUE;
+						? Math.sqrt(mc.player.distanceToSqr(Vec3.atCenterOf(pos))) : Double.MAX_VALUE;
 				allBoxes.add(new Box(dimension, pos, label, icon, typeOf(kind, blockId), entry.updated, stacks, items,
 						label.toLowerCase(Locale.ROOT), itemText.toString(), distance));
 			}
@@ -219,11 +219,11 @@ public class SearchScreen extends Screen {
 	}
 
 	private static String key(ItemStack stack) {
-		return stack.getName().getString() + "|" + Registries.ITEM.getId(stack.getItem());
+		return stack.getHoverName().getString() + "|" + BuiltInRegistries.ITEM.getKey(stack.getItem());
 	}
 
 	private static String itemText(ItemStack stack) {
-		return (stack.getName().getString() + " " + Registries.ITEM.getId(stack.getItem()).getPath().replace('_', ' '))
+		return (stack.getHoverName().getString() + " " + BuiltInRegistries.ITEM.getKey(stack.getItem()).getPath().replace('_', ' '))
 				.toLowerCase(Locale.ROOT);
 	}
 
@@ -245,7 +245,7 @@ public class SearchScreen extends Screen {
 
 	/** Re-applies the search text, filters and sort. */
 	private void refresh() {
-		String query = search == null ? lastQuery : search.getText();
+		String query = search == null ? lastQuery : search.getValue();
 		lastQuery = query;
 		String[] tokens = query.toLowerCase(Locale.ROOT).trim().split("\\s+");
 		if (tokens.length == 1 && tokens[0].isEmpty()) tokens = new String[0];
@@ -258,10 +258,10 @@ public class SearchScreen extends Screen {
 			boolean anyItem = false;
 			for (ItemStack stack : box.stacks) {
 				anyItem |= addLoc(byKey, box, stack, null, tokens, boxMatches);
-				ContainerComponent inner = stack.get(DataComponentTypes.CONTAINER);
+				ItemContainerContents inner = stack.get(DataComponents.CONTAINER);
 				if (nested && inner != null) {
-					String inside = stack.getName().getString();
-					for (ItemStack s : inner.iterateNonEmpty()) anyItem |= addLoc(byKey, box, s, inside, tokens, boxMatches);
+					String inside = stack.getHoverName().getString();
+					for (ItemStack s : inner.nonEmptyItemCopyStream().toList()) anyItem |= addLoc(byKey, box, s, inside, tokens, boxMatches);
 				}
 			}
 			if (tokens.length == 0 || boxMatches || anyItem) matchingBoxes.add(box);
@@ -308,7 +308,7 @@ public class SearchScreen extends Screen {
 		String text = itemText(stack);
 		if (tokens.length > 0 && !boxMatches && !matches(text, tokens)) return false;
 		String key = key(stack);
-		Group group = byKey.computeIfAbsent(key, k -> new Group(stack.getName().getString(), stack.copyWithCount(1), text));
+		Group group = byKey.computeIfAbsent(key, k -> new Group(stack.getHoverName().getString(), stack.copyWithCount(1), text));
 		group.total += stack.getCount();
 		String locKey = box.dimension + "|" + box.pos.asLong() + "|" + inside;
 		Loc old = group.locs.get(locKey);
@@ -324,43 +324,43 @@ public class SearchScreen extends Screen {
 		if (handedOver != null) {
 			// Another mod sent a list: show it straight away.
 			view = View.FETCH;
-			handOffNote = Text.translatable("hoardeye.fetch.imported", handedOver).getString();
+			handOffNote = Component.translatable("hoardeye.fetch.imported", handedOver).getString();
 		}
 		loadBoxes();
 
 		int contentWidth = width - 2 * PAD;
-		search = new TextFieldWidget(textRenderer, PAD + 1, 25, contentWidth - 2, 16, Text.translatable("hoardeye.search.title"));
+		search = new EditBox(font, PAD + 1, 25, contentWidth - 2, 16, Component.translatable("hoardeye.search.title"));
 		search.setMaxLength(64);
-		search.setPlaceholder(Text.translatable("hoardeye.search.placeholder").styled(s -> s.withColor(DIM)));
-		search.setText(lastQuery);
-		search.setChangedListener(text -> {
+		search.setHint(Component.translatable("hoardeye.search.placeholder").withStyle(s -> s.withColor(DIM)));
+		search.setValue(lastQuery);
+		search.setResponder(text -> {
 			leftScroll = 0;
 			refresh();
 		});
-		addDrawableChild(search);
+		addRenderableWidget(search);
 		setInitialFocus(search);
 
 		int buttonY = 46;
 		int buttonWidth = Math.min(120, (contentWidth - 4 * 4) / 5);
 		int x = PAD;
-		addDrawableChild(cycle(x, buttonY, buttonWidth, this::viewLabel, () -> {
+		addRenderableWidget(cycle(x, buttonY, buttonWidth, this::viewLabel, () -> {
 			view = View.values()[(view.ordinal() + 1) % View.values().length];
 			leftScroll = 0;
 		}));
 		x += buttonWidth + 4;
-		ButtonWidget sortButton = addDrawableChild(cycle(x, buttonY, buttonWidth, this::sortLabel, () -> {
+		Button sortButton = addRenderableWidget(cycle(x, buttonY, buttonWidth, this::sortLabel, () -> {
 			if (view == View.ITEMS) itemSort = ItemSort.values()[(itemSort.ordinal() + 1) % ItemSort.values().length];
 			else if (view == View.CONTAINERS) boxSort = BoxSort.values()[(boxSort.ordinal() + 1) % BoxSort.values().length];
 		}));
 		sortButton.active = view != View.FETCH;
 		x += buttonWidth + 4;
-		addDrawableChild(cycle(x, buttonY, buttonWidth, () -> label("scope", scope.name()), () ->
+		addRenderableWidget(cycle(x, buttonY, buttonWidth, () -> label("scope", scope.name()), () ->
 				scope = scope == Scope.ALL ? Scope.HERE : Scope.ALL));
 		x += buttonWidth + 4;
-		addDrawableChild(cycle(x, buttonY, buttonWidth, () -> label("type", typeFilter.name()), () ->
+		addRenderableWidget(cycle(x, buttonY, buttonWidth, () -> label("type", typeFilter.name()), () ->
 				typeFilter = TypeFilter.values()[(typeFilter.ordinal() + 1) % TypeFilter.values().length]));
 		x += buttonWidth + 4;
-		addDrawableChild(cycle(x, buttonY, buttonWidth, () -> label("nested", nested ? "ON" : "OFF"), () -> nested = !nested));
+		addRenderableWidget(cycle(x, buttonY, buttonWidth, () -> label("nested", nested ? "ON" : "OFF"), () -> nested = !nested));
 
 		bodyTop = 72;
 		bodyBottom = height - 28;
@@ -370,57 +370,57 @@ public class SearchScreen extends Screen {
 		rightX1 = width - PAD;
 
 		int half = (rightX1 - rightX0 - 12) / 2;
-		findButton = addDrawableChild(ButtonWidget.builder(Text.translatable("hoardeye.search.find"), b -> {
+		findButton = addRenderableWidget(Button.builder(Component.translatable("hoardeye.search.find"), b -> {
 			if (view == View.FETCH) startRoute();
 			else findNearest();
-		}).dimensions(rightX0 + 4, bodyBottom - 24, half, 20).build());
-		allButton = addDrawableChild(ButtonWidget.builder(Text.empty(), b -> {
+		}).bounds(rightX0 + 4, bodyBottom - 24, half, 20).build());
+		allButton = addRenderableWidget(Button.builder(Component.empty(), b -> {
 			if (view == View.FETCH) {
 				Fetch.clear();
 				refresh();
 			} else {
 				highlightAll();
 			}
-		}).dimensions(rightX0 + 8 + half, bodyBottom - 24, half, 20).build());
-		fetchButton = addDrawableChild(ButtonWidget.builder(Text.translatable("hoardeye.fetch.add"), b -> {
+		}).bounds(rightX0 + 8 + half, bodyBottom - 24, half, 20).build());
+		fetchButton = addRenderableWidget(Button.builder(Component.translatable("hoardeye.fetch.add"), b -> {
 			if (selectedGroup != null) {
 				Fetch.addStack(selectedGroup.icon);
 				updateButtons();
 			}
-		}).dimensions(rightX1 - 64, bodyTop + 18, 58, 20).build());
-		stopButton = addDrawableChild(ButtonWidget.builder(Text.translatable("hoardeye.search.stop"), b -> {
+		}).bounds(rightX1 - 64, bodyTop + 18, 58, 20).build());
+		stopButton = addRenderableWidget(Button.builder(Component.translatable("hoardeye.search.stop"), b -> {
 			Locator.stop();
 			updateButtons();
-		}).dimensions(width - PAD - 100, height - 24, 100, 20).build());
+		}).bounds(width - PAD - 100, height - 24, 100, 20).build());
 
 		refresh();
 	}
 
 	private interface LabelSupplier {
-		Text get();
+		Component get();
 	}
 
-	private ButtonWidget cycle(int x, int y, int w, LabelSupplier label, Runnable action) {
-		return ButtonWidget.builder(label.get(), b -> {
+	private Button cycle(int x, int y, int w, LabelSupplier label, Runnable action) {
+		return Button.builder(label.get(), b -> {
 			action.run();
 			refresh();
 			b.setMessage(label.get());
-			clearAndInit();
-		}).dimensions(x, y, w, 20).build();
+			rebuildWidgets();
+		}).bounds(x, y, w, 20).build();
 	}
 
-	private Text viewLabel() {
+	private Component viewLabel() {
 		return label("view", view.name());
 	}
 
-	private Text sortLabel() {
-		if (view == View.FETCH) return Text.translatable("hoardeye.search.sort", "—");
+	private Component sortLabel() {
+		if (view == View.FETCH) return Component.translatable("hoardeye.search.sort", "—");
 		return label("sort", view == View.ITEMS ? itemSort.name() : boxSort.name());
 	}
 
-	private static Text label(String key, String value) {
-		return Text.translatable("hoardeye.search." + key,
-				Text.translatable("hoardeye.search." + key + "." + value.toLowerCase(Locale.ROOT)));
+	private static Component label(String key, String value) {
+		return Component.translatable("hoardeye.search." + key,
+				Component.translatable("hoardeye.search." + key + "." + value.toLowerCase(Locale.ROOT)));
 	}
 
 	private void updateButtons() {
@@ -428,20 +428,20 @@ public class SearchScreen extends Screen {
 		stopButton.visible = Locator.active();
 		fetchButton.visible = view == View.ITEMS && selectedGroup != null;
 		if (fetchButton.visible) {
-			fetchButton.setTooltip(net.minecraft.client.gui.tooltip.Tooltip.of(Text.translatable("hoardeye.fetch.add.tooltip", Fetch.size())));
+			fetchButton.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.translatable("hoardeye.fetch.add.tooltip", Fetch.size())));
 		}
 		if (view == View.FETCH) {
-			findButton.setMessage(Text.translatable("hoardeye.fetch.start"));
+			findButton.setMessage(Component.translatable("hoardeye.fetch.start"));
 			findButton.active = !fetchRoute.isEmpty();
-			allButton.setMessage(Text.translatable("hoardeye.fetch.clear"));
+			allButton.setMessage(Component.translatable("hoardeye.fetch.clear"));
 			allButton.active = Fetch.size() > 0;
 			return;
 		}
 		List<Locator.Target> targets = currentTargets();
-		findButton.setMessage(Text.translatable("hoardeye.search.find"));
+		findButton.setMessage(Component.translatable("hoardeye.search.find"));
 		findButton.active = !targets.isEmpty();
 		allButton.active = targets.size() > 1;
-		allButton.setMessage(Text.translatable("hoardeye.search.highlight_all", targets.size()));
+		allButton.setMessage(Component.translatable("hoardeye.search.highlight_all", targets.size()));
 	}
 
 	// ---- Fetch list ----
@@ -454,8 +454,8 @@ public class SearchScreen extends Screen {
 
 	/** Containers in this dimension you can walk to, with how many of each item they hold. */
 	private List<Fetch.Candidate> candidates() {
-		MinecraftClient mc = MinecraftClient.getInstance();
-		String here = HoardEyeClient.dimensionKey(mc.world);
+		Minecraft mc = Minecraft.getInstance();
+		String here = HoardEyeClient.dimensionKey(mc.level);
 		List<Fetch.Candidate> result = new ArrayList<>();
 		for (Box box : allBoxes) {
 			if (!box.findable() || !box.dimension.equals(here)) continue;
@@ -469,19 +469,19 @@ public class SearchScreen extends Screen {
 	private void planFetch() {
 		fetchShortages.clear();
 		fetchAvailable.clear();
-		MinecraftClient mc = MinecraftClient.getInstance();
+		Minecraft mc = Minecraft.getInstance();
 		if (mc.player == null) return;
 		List<Fetch.Candidate> candidates = candidates();
 		for (Fetch.Candidate candidate : candidates) {
 			candidate.counts().forEach((key, count) -> fetchAvailable.merge(key, count, Integer::sum));
 		}
-		fetchRoute = Fetch.plan(candidates, mc.player.getEyePos(), fetchShortages);
+		fetchRoute = Fetch.plan(candidates, mc.player.getEyePosition(), fetchShortages);
 	}
 
 	private void startRoute() {
 		if (fetchRoute.isEmpty()) return;
 		Locator.guideRoute(fetchRoute);
-		close();
+		onClose();
 	}
 
 	// ---- Actions ----
@@ -531,13 +531,13 @@ public class SearchScreen extends Screen {
 
 	private void guide(List<Locator.Target> targets) {
 		Locator.guide(targets, what());
-		close();
+		onClose();
 	}
 
 	// ---- Input ----
 
 	@Override
-	public boolean mouseClicked(Click click, boolean doubled) {
+	public boolean mouseClicked(MouseButtonEvent click, boolean doubled) {
 		if (super.mouseClicked(click, doubled)) return true;
 		if (view == View.FETCH) {
 			for (Hit hit : List.copyOf(fetchHits)) {
@@ -597,7 +597,7 @@ public class SearchScreen extends Screen {
 	}
 
 	@Override
-	public boolean keyPressed(KeyInput input) {
+	public boolean keyPressed(KeyEvent input) {
 		int key = input.key();
 		if (key == GLFW.GLFW_KEY_DOWN || key == GLFW.GLFW_KEY_UP) {
 			moveSelection(key == GLFW.GLFW_KEY_DOWN ? 1 : -1);
@@ -647,29 +647,29 @@ public class SearchScreen extends Screen {
 	// ---- Drawing ----
 
 	@Override
-	public void renderBackground(DrawContext context, int mouseX, int mouseY, float delta) {
-		super.renderBackground(context, mouseX, mouseY, delta);
+	public void extractBackground(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
+		super.extractBackground(context, mouseX, mouseY, delta);
 		hoveredStack = ItemStack.EMPTY;
-		TextRenderer font = textRenderer;
+		Font font = this.font;
 
 		// Header.
-		context.drawTextWithShadow(font, Text.literal("▣ ").styled(s -> s.withColor(ACCENT)).append(title), PAD, 9, GOLD);
-		String stats = Text.translatable("hoardeye.search.stats", allBoxes.size(), fmt(totalItems), totalKinds).getString();
-		context.drawTextWithShadow(font, stats, width - PAD - font.getWidth(stats), 9, GRAY);
+		context.text(font, Component.literal("▣ ").withStyle(s -> s.withColor(ACCENT)).append(title), PAD, 9, GOLD);
+		String stats = Component.translatable("hoardeye.search.stats", allBoxes.size(), fmt(totalItems), totalKinds).getString();
+		context.text(font, stats, width - PAD - font.width(stats), 9, GRAY);
 		panel(context, PAD, 23, width - PAD, 43);
 
 		// Left list.
 		String leftTitle = switch (view) {
-			case ITEMS -> Text.translatable("hoardeye.search.items_header", groups.size()).getString();
-			case CONTAINERS -> Text.translatable("hoardeye.search.containers_header", boxes.size()).getString();
-			case FETCH -> Text.translatable("hoardeye.fetch.header", Fetch.size()).getString();
+			case ITEMS -> Component.translatable("hoardeye.search.items_header", groups.size()).getString();
+			case CONTAINERS -> Component.translatable("hoardeye.search.containers_header", boxes.size()).getString();
+			case FETCH -> Component.translatable("hoardeye.fetch.header", Fetch.size()).getString();
 		};
 		panelWithHeader(context, leftX0, bodyTop, leftX1, bodyBottom, leftTitle);
 		fetchHits.clear();
 		if (view == View.FETCH) {
 			drawFetchList(context, mouseX, mouseY);
 		} else if (allBoxes.isEmpty()) {
-			drawWrapped(context, Text.translatable("hoardeye.search.empty_world").getString(), leftX0 + 6, bodyTop + 22, leftX1 - leftX0 - 12, GRAY);
+			drawWrapped(context, Component.translatable("hoardeye.search.empty_world").getString(), leftX0 + 6, bodyTop + 22, leftX1 - leftX0 - 12, GRAY);
 		} else if (view == View.ITEMS) {
 			drawGroupList(context, mouseX, mouseY);
 		} else {
@@ -678,28 +678,28 @@ public class SearchScreen extends Screen {
 
 		// Right details.
 		panelWithHeader(context, rightX0, bodyTop, rightX1, bodyBottom, view == View.FETCH
-				? Text.translatable("hoardeye.fetch.route_header", fetchRoute.size()).getString()
-				: Text.translatable("hoardeye.search.details").getString());
+				? Component.translatable("hoardeye.fetch.route_header", fetchRoute.size()).getString()
+				: Component.translatable("hoardeye.search.details").getString());
 		if (view == View.ITEMS) drawGroupDetails(context, mouseX, mouseY);
 		else if (view == View.CONTAINERS) drawBoxDetails(context, mouseX, mouseY);
 		else drawRoute(context);
 
 		// Footer hint.
-		String hint = Text.translatable(switch (view) {
+		String hint = Component.translatable(switch (view) {
 			case ITEMS -> "hoardeye.search.hint_items";
 			case CONTAINERS -> "hoardeye.search.hint_containers";
 			case FETCH -> "hoardeye.fetch.hint";
 		}).getString();
-		context.drawTextWithShadow(font, font.trimToWidth(hint, width - 2 * PAD - (Locator.active() ? 108 : 0)), PAD, height - 18, DIM);
+		context.text(font, font.plainSubstrByWidth(hint, width - 2 * PAD - (Locator.active() ? 108 : 0)), PAD, height - 18, DIM);
 	}
 
 	@Override
-	public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-		super.render(context, mouseX, mouseY, delta);
-		if (!hoveredStack.isEmpty()) context.drawItemTooltip(textRenderer, hoveredStack, hoverX, hoverY);
+	public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
+		super.extractRenderState(context, mouseX, mouseY, delta);
+		if (!hoveredStack.isEmpty()) context.setTooltipForNextFrame(font, hoveredStack, hoverX, hoverY);
 	}
 
-	private void drawGroupList(DrawContext context, int mouseX, int mouseY) {
+	private void drawGroupList(GuiGraphicsExtractor context, int mouseX, int mouseY) {
 		int top = bodyTop + 16;
 		context.enableScissor(leftX0 + 1, top, leftX1 - 1, bodyBottom - 1);
 		int y = top - (int) leftScroll;
@@ -707,26 +707,26 @@ public class SearchScreen extends Screen {
 			if (y + ROW >= top && y <= bodyBottom) {
 				boolean hovered = mouseX >= leftX0 && mouseX < leftX1 && mouseY >= y && mouseY < y + ROW && mouseY >= top && mouseY < bodyBottom;
 				rowBackground(context, leftX0 + 1, y, leftX1 - 1, group == selectedGroup, hovered);
-				context.drawItem(group.icon, leftX0 + 5, y + 2);
+				context.item(group.icon, leftX0 + 5, y + 2);
 				String count = "×" + fmt(group.total);
-				String spread = Text.translatable("hoardeye.search.in_containers", group.spread()).getString();
-				int rightWidth = textRenderer.getWidth(count) + textRenderer.getWidth(spread) + 10;
+				String spread = Component.translatable("hoardeye.search.in_containers", group.spread()).getString();
+				int rightWidth = font.width(count) + font.width(spread) + 10;
 				int nameWidth = leftX1 - leftX0 - 30 - rightWidth;
-				context.drawTextWithShadow(textRenderer, textRenderer.trimToWidth(group.name, nameWidth), leftX0 + 25, y + 6, WHITE);
-				context.drawTextWithShadow(textRenderer, spread, leftX1 - 6 - textRenderer.getWidth(spread), y + 6, DIM);
-				context.drawTextWithShadow(textRenderer, count, leftX1 - 10 - textRenderer.getWidth(spread) - textRenderer.getWidth(count), y + 6, GOLD);
+				context.text(font, font.plainSubstrByWidth(group.name, nameWidth), leftX0 + 25, y + 6, WHITE);
+				context.text(font, spread, leftX1 - 6 - font.width(spread), y + 6, DIM);
+				context.text(font, count, leftX1 - 10 - font.width(spread) - font.width(count), y + 6, GOLD);
 				if (hovered && mouseX < leftX0 + 23) setHovered(group.icon, mouseX, mouseY);
 			}
 			y += ROW;
 		}
 		context.disableScissor();
 		if (groups.isEmpty()) {
-			context.drawTextWithShadow(textRenderer, Text.translatable("hoardeye.search.no_results"), leftX0 + 6, top + 6, GRAY);
+			context.text(font, Component.translatable("hoardeye.search.no_results"), leftX0 + 6, top + 6, GRAY);
 		}
 		scrollbar(context, leftX1 - 4, top, bodyBottom - 1, leftScroll, maxLeftScroll());
 	}
 
-	private void drawBoxList(DrawContext context, int mouseX, int mouseY) {
+	private void drawBoxList(GuiGraphicsExtractor context, int mouseX, int mouseY) {
 		int top = bodyTop + 16;
 		context.enableScissor(leftX0 + 1, top, leftX1 - 1, bodyBottom - 1);
 		int y = top - (int) leftScroll;
@@ -734,55 +734,55 @@ public class SearchScreen extends Screen {
 			if (y + ROW >= top && y <= bodyBottom) {
 				boolean hovered = mouseX >= leftX0 && mouseX < leftX1 && mouseY >= y && mouseY < y + ROW && mouseY >= top && mouseY < bodyBottom;
 				rowBackground(context, leftX0 + 1, y, leftX1 - 1, box == selectedBox, hovered);
-				context.drawItem(box.icon, leftX0 + 5, y + 2);
+				context.item(box.icon, leftX0 + 5, y + 2);
 				String where = whereText(box);
-				int whereWidth = textRenderer.getWidth(where);
+				int whereWidth = font.width(where);
 				String count = fmt(box.totalItems);
-				int countWidth = textRenderer.getWidth(count);
-				context.drawTextWithShadow(textRenderer, textRenderer.trimToWidth(box.label, leftX1 - leftX0 - 40 - whereWidth - countWidth), leftX0 + 25, y + 6, WHITE);
-				context.drawTextWithShadow(textRenderer, count, leftX1 - 12 - whereWidth - countWidth, y + 6, GOLD);
-				context.drawTextWithShadow(textRenderer, where, leftX1 - 6 - whereWidth, y + 6, DIM);
+				int countWidth = font.width(count);
+				context.text(font, font.plainSubstrByWidth(box.label, leftX1 - leftX0 - 40 - whereWidth - countWidth), leftX0 + 25, y + 6, WHITE);
+				context.text(font, count, leftX1 - 12 - whereWidth - countWidth, y + 6, GOLD);
+				context.text(font, where, leftX1 - 6 - whereWidth, y + 6, DIM);
 			}
 			y += ROW;
 		}
 		context.disableScissor();
 		if (boxes.isEmpty()) {
-			context.drawTextWithShadow(textRenderer, Text.translatable("hoardeye.search.no_results"), leftX0 + 6, top + 6, GRAY);
+			context.text(font, Component.translatable("hoardeye.search.no_results"), leftX0 + 6, top + 6, GRAY);
 		}
 		scrollbar(context, leftX1 - 4, top, bodyBottom - 1, leftScroll, maxLeftScroll());
 	}
 
-	private void drawGroupDetails(DrawContext context, int mouseX, int mouseY) {
+	private void drawGroupDetails(GuiGraphicsExtractor context, int mouseX, int mouseY) {
 		int x = rightX0 + 6;
 		int y = bodyTop + 18;
 		if (selectedGroup == null) {
-			drawWrapped(context, Text.translatable("hoardeye.search.select_item").getString(), x, y, rightX1 - rightX0 - 12, GRAY);
+			drawWrapped(context, Component.translatable("hoardeye.search.select_item").getString(), x, y, rightX1 - rightX0 - 12, GRAY);
 			return;
 		}
 		Group group = selectedGroup;
 		bigIcon(context, group.icon, x, y);
 		if (mouseX >= x && mouseX < x + 32 && mouseY >= y && mouseY < y + 32) setHovered(group.icon, mouseX, mouseY);
 		int textX = x + 38;
-		context.drawTextWithShadow(textRenderer, textRenderer.trimToWidth(group.name, rightX1 - textX - 70), textX, y + 4, WHITE);
-		String summary = Text.translatable("hoardeye.search.group_summary", fmt(group.total), group.spread()).getString();
-		context.drawTextWithShadow(textRenderer, textRenderer.trimToWidth(summary, rightX1 - textX - 70), textX, y + 17, GOLD);
+		context.text(font, font.plainSubstrByWidth(group.name, rightX1 - textX - 70), textX, y + 4, WHITE);
+		String summary = Component.translatable("hoardeye.search.group_summary", fmt(group.total), group.spread()).getString();
+		context.text(font, font.plainSubstrByWidth(summary, rightX1 - textX - 70), textX, y + 17, GOLD);
 
 		int top = bodyTop + 50;
 		int bottom = bodyBottom - 28;
-		context.drawHorizontalLine(rightX0 + 4, rightX1 - 5, top - 3, BORDER);
+		context.horizontalLine(rightX0 + 4, rightX1 - 5, top - 3, BORDER);
 		context.enableScissor(rightX0 + 1, top, rightX1 - 1, bottom);
 		int rowY = top - (int) rightScroll;
 		for (Loc loc : group.sorted) {
 			if (rowY + LOC_ROW >= top && rowY <= bottom) {
 				boolean hovered = mouseX >= rightX0 && mouseX < rightX1 && mouseY >= rowY && mouseY < rowY + LOC_ROW && mouseY >= top && mouseY < bottom;
 				rowBackground(context, rightX0 + 1, rowY, rightX1 - 1, false, hovered && loc.box.findable());
-				context.drawItem(loc.box.icon, rightX0 + 5, rowY + 3);
+				context.item(loc.box.icon, rightX0 + 5, rowY + 3);
 				String count = "×" + fmt(loc.count);
-				int countWidth = textRenderer.getWidth(count);
-				context.drawTextWithShadow(textRenderer, textRenderer.trimToWidth(loc.box.label, rightX1 - rightX0 - 36 - countWidth), rightX0 + 25, rowY + 2, WHITE);
-				context.drawTextWithShadow(textRenderer, count, rightX1 - 8 - countWidth, rowY + 2, GOLD);
+				int countWidth = font.width(count);
+				context.text(font, font.plainSubstrByWidth(loc.box.label, rightX1 - rightX0 - 36 - countWidth), rightX0 + 25, rowY + 2, WHITE);
+				context.text(font, count, rightX1 - 8 - countWidth, rowY + 2, GOLD);
 				String detail = locationText(loc.box) + (loc.inside != null ? "  ▸ " + loc.inside : "");
-				context.drawTextWithShadow(textRenderer, textRenderer.trimToWidth(detail, rightX1 - rightX0 - 32), rightX0 + 25, rowY + 12, loc.inside != null ? 0xFFB088FF : GRAY);
+				context.text(font, font.plainSubstrByWidth(detail, rightX1 - rightX0 - 32), rightX0 + 25, rowY + 12, loc.inside != null ? 0xFFB088FF : GRAY);
 			}
 			rowY += LOC_ROW;
 		}
@@ -790,20 +790,20 @@ public class SearchScreen extends Screen {
 		scrollbar(context, rightX1 - 4, top, bottom, rightScroll, maxRightScroll());
 	}
 
-	private void drawBoxDetails(DrawContext context, int mouseX, int mouseY) {
+	private void drawBoxDetails(GuiGraphicsExtractor context, int mouseX, int mouseY) {
 		int x = rightX0 + 6;
 		int y = bodyTop + 18;
 		if (selectedBox == null) {
-			drawWrapped(context, Text.translatable("hoardeye.search.select_container").getString(), x, y, rightX1 - rightX0 - 12, GRAY);
+			drawWrapped(context, Component.translatable("hoardeye.search.select_container").getString(), x, y, rightX1 - rightX0 - 12, GRAY);
 			return;
 		}
 		Box box = selectedBox;
 		bigIcon(context, box.icon, x, y);
 		int textX = x + 38;
-		context.drawTextWithShadow(textRenderer, textRenderer.trimToWidth(box.label, rightX1 - textX - 6), textX, y + 2, WHITE);
-		context.drawTextWithShadow(textRenderer, textRenderer.trimToWidth(locationText(box), rightX1 - textX - 6), textX, y + 13, GRAY);
-		String checked = box.updated > 0 ? Text.translatable("hoardeye.search.checked", ago(box.updated)).getString() : "";
-		context.drawTextWithShadow(textRenderer, checked, textX, y + 24, DIM);
+		context.text(font, font.plainSubstrByWidth(box.label, rightX1 - textX - 6), textX, y + 2, WHITE);
+		context.text(font, font.plainSubstrByWidth(locationText(box), rightX1 - textX - 6), textX, y + 13, GRAY);
+		String checked = box.updated > 0 ? Component.translatable("hoardeye.search.checked", ago(box.updated)).getString() : "";
+		context.text(font, checked, textX, y + 24, DIM);
 
 		// The contents as a grid.
 		int columns = Math.max(1, (rightX1 - rightX0 - 12) / CELL);
@@ -816,22 +816,22 @@ public class SearchScreen extends Screen {
 			if (cy + CELL > bodyBottom - 28) break;
 			context.fill(cx, cy, cx + CELL - 1, cy + CELL - 1, 0x40000000);
 			ItemStack stack = stacks.get(i);
-			context.drawItem(stack, cx, cy);
-			context.drawStackOverlay(textRenderer, stack, cx, cy);
+			context.item(stack, cx, cy);
+			context.itemDecorations(font, stack, cx, cy);
 			if (mouseX >= cx && mouseX < cx + CELL && mouseY >= cy && mouseY < cy + CELL) {
 				context.fill(cx, cy, cx + 16, cy + 16, 0x50FFFFFF);
 				setHovered(stack, mouseX, mouseY);
 			}
 		}
-		if (stacks.isEmpty()) context.drawTextWithShadow(textRenderer, Text.translatable("hoardeye.empty"), gridX, gridY, GRAY);
+		if (stacks.isEmpty()) context.text(font, Component.translatable("hoardeye.empty"), gridX, gridY, GRAY);
 	}
 
 	/** The fetch list: each item with how many you want and how many are stored, plus − / + / ✖ chips. */
-	private void drawFetchList(DrawContext context, int mouseX, int mouseY) {
+	private void drawFetchList(GuiGraphicsExtractor context, int mouseX, int mouseY) {
 		int top = bodyTop + 16;
 		List<Fetch.Want> wants = Fetch.wants();
 		if (wants.isEmpty()) {
-			drawWrapped(context, Text.translatable("hoardeye.fetch.empty").getString(), leftX0 + 6, top + 6, leftX1 - leftX0 - 12, GRAY);
+			drawWrapped(context, Component.translatable("hoardeye.fetch.empty").getString(), leftX0 + 6, top + 6, leftX1 - leftX0 - 12, GRAY);
 			return;
 		}
 		context.enableScissor(leftX0 + 1, top, leftX1 - 1, bodyBottom - 1);
@@ -840,18 +840,18 @@ public class SearchScreen extends Screen {
 			if (y + ROW >= top && y <= bodyBottom) {
 				boolean hovered = mouseX >= leftX0 && mouseX < leftX1 && mouseY >= y && mouseY < y + ROW;
 				if (hovered) context.fill(leftX0 + 1, y, leftX1 - 1, y + ROW, HOVER);
-				context.drawItem(want.icon, leftX0 + 5, y + 2);
+				context.item(want.icon, leftX0 + 5, y + 2);
 				int have = fetchAvailable.getOrDefault(want.key, 0);
 				String count = "×" + fmt(want.count);
-				String stock = Text.translatable("hoardeye.fetch.stored", fmt(have)).getString();
+				String stock = Component.translatable("hoardeye.fetch.stored", fmt(have)).getString();
 				int chipsWidth = 3 * 16;
 				int x = leftX1 - 6 - chipsWidth;
 				// Right to left: chips, stored, wanted; the name gets whatever room is left.
-				int stockX = x - 6 - textRenderer.getWidth(stock);
-				int countX = stockX - 6 - textRenderer.getWidth(count);
-				context.drawTextWithShadow(textRenderer, textRenderer.trimToWidth(want.name, Math.max(0, countX - leftX0 - 30)), leftX0 + 25, y + 6, WHITE);
-				context.drawTextWithShadow(textRenderer, count, countX, y + 6, GOLD);
-				context.drawTextWithShadow(textRenderer, stock, stockX, y + 6, have >= want.count ? 0xFF55FF55 : 0xFFFF7070);
+				int stockX = x - 6 - font.width(stock);
+				int countX = stockX - 6 - font.width(count);
+				context.text(font, font.plainSubstrByWidth(want.name, Math.max(0, countX - leftX0 - 30)), leftX0 + 25, y + 6, WHITE);
+				context.text(font, count, countX, y + 6, GOLD);
+				context.text(font, stock, stockX, y + 6, have >= want.count ? 0xFF55FF55 : 0xFFFF7070);
 				x = chip(context, x, y + 3, "−", 0xFFFFAA40, mouseX, mouseY, () -> Fetch.adjust(want.key, -1));
 				x = chip(context, x, y + 3, "+", 0xFF55CC55, mouseX, mouseY, () -> Fetch.adjust(want.key, 1));
 				chip(context, x, y + 3, "✖", 0xFFFF5555, mouseX, mouseY, () -> Fetch.remove(want.key));
@@ -861,22 +861,22 @@ public class SearchScreen extends Screen {
 		context.disableScissor();
 	}
 
-	private int chip(DrawContext context, int x, int y, String label, int color, int mouseX, int mouseY, Runnable action) {
+	private int chip(GuiGraphicsExtractor context, int x, int y, String label, int color, int mouseX, int mouseY, Runnable action) {
 		boolean over = mouseX >= x && mouseX < x + 14 && mouseY >= y && mouseY < y + 14;
 		context.fill(x, y, x + 14, y + 14, (color & 0xFFFFFF) | (over ? 0x70000000 : 0x30000000));
-		context.drawStrokedRectangle(x, y, 14, 14, color);
-		context.drawTextWithShadow(textRenderer, label, x + 7 - textRenderer.getWidth(label) / 2, y + 3, over ? 0xFFFFFFFF : color);
+		context.outline(x, y, 14, 14, color);
+		context.text(font, label, x + 7 - font.width(label) / 2, y + 3, over ? 0xFFFFFFFF : color);
 		if (y >= bodyTop + 16 && y + 14 <= bodyBottom) fetchHits.add(new Hit(x, y, x + 14, y + 14, action));
 		return x + 16;
 	}
 
 	/** The planned route: each stop and what to take there, plus anything that can't be found in full. */
-	private void drawRoute(DrawContext context) {
+	private void drawRoute(GuiGraphicsExtractor context) {
 		int x = rightX0 + 6;
 		int y = bodyTop + 20;
 		int width = rightX1 - rightX0 - 12;
 		if (Fetch.size() == 0) {
-			drawWrapped(context, Text.translatable("hoardeye.fetch.route_empty").getString(), x, y, width, GRAY);
+			drawWrapped(context, Component.translatable("hoardeye.fetch.route_empty").getString(), x, y, width, GRAY);
 			return;
 		}
 		int bottom = bodyBottom - 28;
@@ -884,26 +884,26 @@ public class SearchScreen extends Screen {
 		context.enableScissor(rightX0 + 1, y - 2, rightX1 - 1, bottom);
 		y -= (int) rightScroll;
 		if (handOffNote != null) {
-			for (var line : textRenderer.wrapLines(Text.literal(handOffNote), width)) {
-				context.drawTextWithShadow(textRenderer, line, x, y, ACCENT);
+			for (var line : font.split(Component.literal(handOffNote), width)) {
+				context.text(font, line, x, y, ACCENT);
 				y += 10;
 			}
 			y += 4;
 		}
 		// Shortages first: they're what you need to know before setting off.
 		for (String shortage : fetchShortages) {
-			context.drawTextWithShadow(textRenderer, textRenderer.trimToWidth("⚠ " + shortage, width), x, y, 0xFFFF7070);
+			context.text(font, font.plainSubstrByWidth("⚠ " + shortage, width), x, y, 0xFFFF7070);
 			y += 11;
 		}
 		if (!fetchShortages.isEmpty()) y += 4;
 		for (int i = 0; i < fetchRoute.size(); i++) {
 			Fetch.Stop stop = fetchRoute.get(i);
-			context.drawItem(stop.icon(), x, y);
-			double distance = MinecraftClient.getInstance().player.getEyePos().distanceTo(net.minecraft.util.math.Vec3d.ofCenter(stop.pos()));
-			context.drawTextWithShadow(textRenderer, textRenderer.trimToWidth((i + 1) + ". " + stop.label() + "  (" + (int) distance + "m)", width - 20), x + 20, y + 4, WHITE);
+			context.item(stop.icon(), x, y);
+			double distance = Minecraft.getInstance().player.getEyePosition().distanceTo(net.minecraft.world.phys.Vec3.atCenterOf(stop.pos()));
+			context.text(font, font.plainSubstrByWidth((i + 1) + ". " + stop.label() + "  (" + (int) distance + "m)", width - 20), x + 20, y + 4, WHITE);
 			y += 18;
 			for (Fetch.Take take : stop.takes()) {
-				context.drawTextWithShadow(textRenderer, textRenderer.trimToWidth("   " + take.count() + " × " + take.name(), width - 20), x + 20, y, GRAY);
+				context.text(font, font.plainSubstrByWidth("   " + take.count() + " × " + take.name(), width - 20), x + 20, y, GRAY);
 				y += 10;
 			}
 			y += 4;
@@ -922,20 +922,20 @@ public class SearchScreen extends Screen {
 		hoverY = y;
 	}
 
-	private void panel(DrawContext context, int x0, int y0, int x1, int y1) {
+	private void panel(GuiGraphicsExtractor context, int x0, int y0, int x1, int y1) {
 		context.fill(x0, y0, x1, y1, PANEL);
-		context.drawStrokedRectangle(x0, y0, x1 - x0, y1 - y0, BORDER);
+		context.outline(x0, y0, x1 - x0, y1 - y0, BORDER);
 	}
 
-	private void panelWithHeader(DrawContext context, int x0, int y0, int x1, int y1, String title) {
+	private void panelWithHeader(GuiGraphicsExtractor context, int x0, int y0, int x1, int y1, String title) {
 		panel(context, x0, y0, x1, y1);
 		context.fill(x0 + 1, y0 + 1, x1 - 1, y0 + 14, PANEL_HEADER);
-		context.drawHorizontalLine(x0 + 1, x1 - 2, y0 + 14, BORDER);
+		context.horizontalLine(x0 + 1, x1 - 2, y0 + 14, BORDER);
 		context.fill(x0 + 1, y0 + 1, x0 + 3, y0 + 14, ACCENT);
-		context.drawTextWithShadow(textRenderer, title, x0 + 7, y0 + 4, GOLD);
+		context.text(font, title, x0 + 7, y0 + 4, GOLD);
 	}
 
-	private static void rowBackground(DrawContext context, int x0, int y, int x1, boolean selected, boolean hovered) {
+	private static void rowBackground(GuiGraphicsExtractor context, int x0, int y, int x1, boolean selected, boolean hovered) {
 		if (selected) {
 			context.fill(x0, y, x1, y + ROW, SELECTED);
 			context.fill(x0, y, x0 + 2, y + ROW, ACCENT);
@@ -944,7 +944,7 @@ public class SearchScreen extends Screen {
 		}
 	}
 
-	private static void scrollbar(DrawContext context, int x, int top, int bottom, double scroll, double max) {
+	private static void scrollbar(GuiGraphicsExtractor context, int x, int top, int bottom, double scroll, double max) {
 		if (max <= 0) return;
 		int view = bottom - top;
 		int bar = Math.max(16, (int) (view * view / (view + max)));
@@ -953,32 +953,32 @@ public class SearchScreen extends Screen {
 		context.fill(x, barY, x + 2, barY + bar, ACCENT);
 	}
 
-	private void bigIcon(DrawContext context, ItemStack stack, int x, int y) {
+	private void bigIcon(GuiGraphicsExtractor context, ItemStack stack, int x, int y) {
 		context.fill(x - 1, y - 1, x + 33, y + 33, 0x60000000);
-		context.drawStrokedRectangle(x - 1, y - 1, 34, 34, BORDER);
-		Matrix3x2fStack matrices = context.getMatrices();
+		context.outline(x - 1, y - 1, 34, 34, BORDER);
+		Matrix3x2fStack matrices = context.pose();
 		matrices.pushMatrix();
 		matrices.translate(x, y);
 		matrices.scale(2, 2);
-		context.drawItem(stack, 0, 0);
+		context.item(stack, 0, 0);
 		matrices.popMatrix();
 	}
 
-	private void drawWrapped(DrawContext context, String text, int x, int y, int width, int color) {
-		for (var line : textRenderer.wrapLines(Text.literal(text), width)) {
-			context.drawTextWithShadow(textRenderer, line, x, y, color);
+	private void drawWrapped(GuiGraphicsExtractor context, String text, int x, int y, int width, int color) {
+		for (var line : font.split(Component.literal(text), width)) {
+			context.text(font, line, x, y, color);
 			y += 11;
 		}
 	}
 
 	private static String whereText(Box box) {
-		if (box.dimension.equals(ENDER)) return Text.translatable("hoardeye.search.ender").getString();
+		if (box.dimension.equals(ENDER)) return Component.translatable("hoardeye.search.ender").getString();
 		if (box.distance != Double.MAX_VALUE) return (int) box.distance + "m";
 		return dimensionName(box.dimension);
 	}
 
 	private static String locationText(Box box) {
-		if (box.dimension.equals(ENDER)) return Text.translatable("hoardeye.search.ender_long").getString();
+		if (box.dimension.equals(ENDER)) return Component.translatable("hoardeye.search.ender_long").getString();
 		String coords = box.pos.getX() + " " + box.pos.getY() + " " + box.pos.getZ();
 		return box.distance != Double.MAX_VALUE ? coords + "  ·  " + (int) box.distance + "m" : coords + "  ·  " + dimensionName(box.dimension);
 	}
@@ -1005,19 +1005,19 @@ public class SearchScreen extends Screen {
 	}
 
 	@Override
-	public boolean shouldPause() {
+	public boolean isPauseScreen() {
 		return false;
 	}
 
 	// ---- Hooks for the development self-test ----
 
 	public void testQuery(String query) {
-		search.setText(query);
+		search.setValue(query);
 	}
 
 	public void testView(boolean containers) {
 		view = containers ? View.CONTAINERS : View.ITEMS;
-		clearAndInit();
+		rebuildWidgets();
 	}
 
 	/** Total count of the item with this display name in the current results, or -1 if absent. */
@@ -1034,7 +1034,7 @@ public class SearchScreen extends Screen {
 
 	public void testShowFetch() {
 		view = View.FETCH;
-		clearAndInit();
+		rebuildWidgets();
 	}
 
 	public int testRouteStops() {

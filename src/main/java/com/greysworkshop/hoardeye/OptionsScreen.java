@@ -1,16 +1,5 @@
 package com.greysworkshop.hoardeye;
 
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.tooltip.Tooltip;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.ClickableWidget;
-import net.minecraft.client.gui.widget.SliderWidget;
-import net.minecraft.client.gui.widget.TextFieldWidget;
-import net.minecraft.screen.ScreenTexts;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.MathHelper;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BooleanSupplier;
@@ -20,6 +9,16 @@ import java.util.function.IntConsumer;
 import java.util.function.IntFunction;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.AbstractSliderButton;
+import net.minecraft.client.gui.components.AbstractWidget;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.Tooltip;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.CommonComponents;
+import net.minecraft.network.chat.Component;
+import net.minecraft.util.Mth;
 
 /**
  * A tabbed, scrollable settings screen. Each row is a label on the left and a control on the right; hovering
@@ -37,16 +36,16 @@ public abstract class OptionsScreen extends Screen {
 	protected record Tab(String key, Consumer<Rows> rows) {}
 
 	/** One line of the list. {@code control} builds the widget at x, y, width; null for headers and notes. */
-	private record Row(Text label, Text description, ControlFactory control, boolean header, boolean wide,
+	private record Row(Component label, Component description, ControlFactory control, boolean header, boolean wide,
 			java.util.function.Predicate<String> adder) {
-		Row(Text label, Text description, ControlFactory control, boolean header, boolean wide) {
+		Row(Component label, Component description, ControlFactory control, boolean header, boolean wide) {
 			this(label, description, control, header, wide, null);
 		}
 	}
 
 	@FunctionalInterface
 	protected interface ControlFactory {
-		ClickableWidget create(int x, int y, int width);
+		AbstractWidget create(int x, int y, int width);
 	}
 
 	private final Screen parent;
@@ -56,7 +55,7 @@ public abstract class OptionsScreen extends Screen {
 	private final List<Row> rows = new ArrayList<>();
 	private final List<int[]> labelPositions = new ArrayList<>();
 
-	protected OptionsScreen(Screen parent, Text title, String prefix) {
+	protected OptionsScreen(Screen parent, Component title, String prefix) {
 		super(title);
 		this.parent = parent;
 		this.prefix = prefix;
@@ -69,89 +68,89 @@ public abstract class OptionsScreen extends Screen {
 	/** Builder for a tab's rows. */
 	protected final class Rows {
 		public void header(String key) {
-			rows.add(new Row(Text.translatable(prefix + "." + key), null, null, true, false));
+			rows.add(new Row(Component.translatable(prefix + "." + key), null, null, true, false));
 		}
 
-		public void note(Text text) {
+		public void note(Component text) {
 			rows.add(new Row(text, null, null, false, true));
 		}
 
 		/** A toggle with a ready-made label and description instead of translation keys. */
-		public void toggle(Text label, Text description, BooleanSupplier getter, Consumer<Boolean> setter) {
-			rows.add(new Row(label, description, (x, y, w) -> ButtonWidget.builder(onOff(getter.getAsBoolean()), b -> {
+		public void toggle(Component label, Component description, BooleanSupplier getter, Consumer<Boolean> setter) {
+			rows.add(new Row(label, description, (x, y, w) -> Button.builder(onOff(getter.getAsBoolean()), b -> {
 				setter.accept(!getter.getAsBoolean());
 				b.setMessage(onOff(getter.getAsBoolean()));
-			}).dimensions(x, y, w, 20).build(), false, false));
+			}).bounds(x, y, w, 20).build(), false, false));
 		}
 
 		public void toggle(String key, BooleanSupplier getter, Consumer<Boolean> setter) {
-			Text label = Text.translatable(prefix + "." + key);
-			add(key, (x, y, w) -> ButtonWidget.builder(onOff(getter.getAsBoolean()), b -> {
+			Component label = Component.translatable(prefix + "." + key);
+			add(key, (x, y, w) -> Button.builder(onOff(getter.getAsBoolean()), b -> {
 				setter.accept(!getter.getAsBoolean());
 				b.setMessage(onOff(getter.getAsBoolean()));
-			}).dimensions(x, y, w, 20).build(), label);
+			}).bounds(x, y, w, 20).build(), label);
 		}
 
 		/** An integer slider; {@code format} turns the value into its display text. */
 		public void slider(String key, int min, int max, IntSupplier getter, IntConsumer setter, IntFunction<String> format) {
-			add(key, (x, y, w) -> new SliderWidget(x, y, w, 20, Text.empty(), (getter.getAsInt() - min) / (double) (max - min)) {
+			add(key, (x, y, w) -> new AbstractSliderButton(x, y, w, 20, Component.empty(), (getter.getAsInt() - min) / (double) (max - min)) {
 				{
 					updateMessage();
 				}
 
 				private int current() {
-					return min + (int) Math.round(MathHelper.clamp(value, 0, 1) * (max - min));
+					return min + (int) Math.round(Mth.clamp(value, 0, 1) * (max - min));
 				}
 
 				@Override
 				protected void updateMessage() {
-					setMessage(Text.literal(format.apply(current())));
+					setMessage(Component.literal(format.apply(current())));
 				}
 
 				@Override
 				protected void applyValue() {
 					setter.accept(current());
 				}
-			}, Text.translatable(prefix + "." + key));
+			}, Component.translatable(prefix + "." + key));
 		}
 
-		public <E extends Enum<E>> void cycle(String key, E[] values, Supplier<E> getter, Consumer<E> setter, Function<E, Text> names) {
-			add(key, (x, y, w) -> ButtonWidget.builder(names.apply(getter.get()), b -> {
+		public <E extends Enum<E>> void cycle(String key, E[] values, Supplier<E> getter, Consumer<E> setter, Function<E, Component> names) {
+			add(key, (x, y, w) -> Button.builder(names.apply(getter.get()), b -> {
 				E next = values[(getter.get().ordinal() + 1) % values.length];
 				setter.accept(next);
 				b.setMessage(names.apply(next));
-			}).dimensions(x, y, w, 20).build(), Text.translatable(prefix + "." + key));
+			}).bounds(x, y, w, 20).build(), Component.translatable(prefix + "." + key));
 		}
 
 		public void button(String key, Runnable action) {
-			add(key, (x, y, w) -> ButtonWidget.builder(Text.translatable(prefix + "." + key + ".button"), b -> action.run())
-					.dimensions(x, y, w, 20).build(), Text.translatable(prefix + "." + key));
+			add(key, (x, y, w) -> Button.builder(Component.translatable(prefix + "." + key + ".button"), b -> action.run())
+					.bounds(x, y, w, 20).build(), Component.translatable(prefix + "." + key));
 		}
 
 		/** A text box plus an "Add" button; {@code add} returns false if the entry was rejected. */
 		public void adder(String key, java.util.function.Predicate<String> add) {
-			rows.add(new Row(Text.translatable(prefix + "." + key), description(key), null, false, false, add));
+			rows.add(new Row(Component.translatable(prefix + "." + key), description(key), null, false, false, add));
 		}
 
 		/** An entry in a list with a remove button. */
-		public void removable(Text label, Runnable remove) {
-			rows.add(new Row(label, null, (x, y, w) -> ButtonWidget.builder(Text.translatable(prefix + ".remove"), b -> {
+		public void removable(Component label, Runnable remove) {
+			rows.add(new Row(label, null, (x, y, w) -> Button.builder(Component.translatable(prefix + ".remove"), b -> {
 				remove.run();
-				clearAndInit();
-			}).dimensions(x + w - 60, y, 60, 20).build(), false, false));
+				rebuildWidgets();
+			}).bounds(x + w - 60, y, 60, 20).build(), false, false));
 		}
 
-		private void add(String key, ControlFactory control, Text label) {
+		private void add(String key, ControlFactory control, Component label) {
 			rows.add(new Row(label, description(key), control, false, false));
 		}
 
-		private Text description(String key) {
-			return Text.translatable(prefix + "." + key + ".desc");
+		private Component description(String key) {
+			return Component.translatable(prefix + "." + key + ".desc");
 		}
 	}
 
-	protected static Text onOff(boolean on) {
-		return on ? ScreenTexts.ON.copy().styled(s -> s.withColor(0x55FF55)) : ScreenTexts.OFF.copy().styled(s -> s.withColor(0xFF7070));
+	protected static Component onOff(boolean on) {
+		return on ? CommonComponents.OPTION_ON.copy().withStyle(s -> s.withColor(0x55FF55)) : CommonComponents.OPTION_OFF.copy().withStyle(s -> s.withColor(0xFF7070));
 	}
 
 	@Override
@@ -164,13 +163,13 @@ public abstract class OptionsScreen extends Screen {
 		int x = width / 2 - (tabs.size() * (tabWidth + 4) - 4) / 2;
 		for (int i = 0; i < tabs.size(); i++) {
 			int index = i;
-			ButtonWidget button = ButtonWidget.builder(Text.translatable(prefix + ".tab." + tabs.get(i).key()), b -> {
+			Button button = Button.builder(Component.translatable(prefix + ".tab." + tabs.get(i).key()), b -> {
 				tab = index;
 				scroll = 0;
-				clearAndInit();
-			}).dimensions(x, 28, tabWidth, 20).build();
+				rebuildWidgets();
+			}).bounds(x, 28, tabWidth, 20).build();
 			button.active = i != tab;
-			addDrawableChild(button);
+			addRenderableWidget(button);
 			x += tabWidth + 4;
 		}
 
@@ -179,8 +178,8 @@ public abstract class OptionsScreen extends Screen {
 		scroll = Math.min(scroll, maxScroll());
 		layout();
 
-		addDrawableChild(ButtonWidget.builder(ScreenTexts.DONE, b -> close())
-				.dimensions(width / 2 - 100, height - 26, 200, 20).build());
+		addRenderableWidget(Button.builder(CommonComponents.GUI_DONE, b -> onClose())
+				.bounds(width / 2 - 100, height - 26, 200, 20).build());
 	}
 
 	private int contentLeft() {
@@ -198,7 +197,7 @@ public abstract class OptionsScreen extends Screen {
 	/** Notes are as tall as their wrapped text; everything else is one row. */
 	private int rowHeight(Row row) {
 		if (!row.wide) return ROW;
-		return textRenderer.wrapLines(row.label, contentRight() - contentLeft()).size() * 10 + 6;
+		return font.split(row.label, contentRight() - contentLeft()).size() * 10 + 6;
 	}
 
 	private int contentHeight() {
@@ -219,19 +218,19 @@ public abstract class OptionsScreen extends Screen {
 			labelPositions.add(new int[]{i, rowY});
 			if (row.adder != null) {
 				// A text box with an Add button beside it.
-				TextFieldWidget field = new TextFieldWidget(textRenderer, controlX + 1, rowY + 2, CONTROL_WIDTH - 46, 16, row.label);
+				EditBox field = new EditBox(font, controlX + 1, rowY + 2, CONTROL_WIDTH - 46, 16, row.label);
 				field.setMaxLength(64);
-				if (row.description != null) field.setTooltip(Tooltip.of(row.description));
-				addDrawableChild(field);
-				addDrawableChild(ButtonWidget.builder(Text.translatable(prefix + ".add"), b -> {
-					if (row.adder.test(field.getText().trim())) clearAndInit();
-				}).dimensions(controlX + CONTROL_WIDTH - 40, rowY, 40, 20).build());
+				if (row.description != null) field.setTooltip(Tooltip.create(row.description));
+				addRenderableWidget(field);
+				addRenderableWidget(Button.builder(Component.translatable(prefix + ".add"), b -> {
+					if (row.adder.test(field.getValue().trim())) rebuildWidgets();
+				}).bounds(controlX + CONTROL_WIDTH - 40, rowY, 40, 20).build());
 				continue;
 			}
 			if (row.control == null) continue;
-			ClickableWidget widget = row.control.create(controlX, rowY, CONTROL_WIDTH);
-			if (row.description != null) widget.setTooltip(Tooltip.of(row.description));
-			addDrawableChild(widget);
+			AbstractWidget widget = row.control.create(controlX, rowY, CONTROL_WIDTH);
+			if (row.description != null) widget.setTooltip(Tooltip.create(row.description));
+			addRenderableWidget(widget);
 		}
 	}
 
@@ -244,31 +243,31 @@ public abstract class OptionsScreen extends Screen {
 		double before = scroll;
 		scroll = Math.max(0, Math.min(maxScroll(), scroll - verticalAmount * ROW));
 		scroll = Math.round(scroll);
-		if (scroll != before) clearAndInit();
+		if (scroll != before) rebuildWidgets();
 		return true;
 	}
 
 	@Override
-	public void renderBackground(DrawContext context, int mouseX, int mouseY, float delta) {
-		super.renderBackground(context, mouseX, mouseY, delta);
-		context.drawCenteredTextWithShadow(textRenderer, title, width / 2, 12, GOLD);
+	public void extractBackground(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
+		super.extractBackground(context, mouseX, mouseY, delta);
+		context.centeredText(font, title, width / 2, 12, GOLD);
 		int left = contentLeft(), right = contentRight();
 		context.fill(left - 6, TOP - 4, right + 6, listBottom() + 2, 0x80000000);
 		for (int[] position : labelPositions) {
 			Row row = rows.get(position[0]);
 			int y = position[1];
 			if (row.header) {
-				context.drawTextWithShadow(textRenderer, row.label, left, y + 8, GOLD);
+				context.text(font, row.label, left, y + 8, GOLD);
 				context.fill(left, y + 18, right, y + 19, 0x40FFC040);
 			} else if (row.wide) {
 				int lineY = y + 2;
-				for (var line : textRenderer.wrapLines(row.label, right - left)) {
-					context.drawTextWithShadow(textRenderer, line, left, lineY, GRAY);
+				for (var line : font.split(row.label, right - left)) {
+					context.text(font, line, left, lineY, GRAY);
 					lineY += 10;
 				}
 			} else {
 				int labelWidth = right - left - CONTROL_WIDTH - 8;
-				context.drawTextWithShadow(textRenderer, textRenderer.trimToWidth(row.label.getString(), labelWidth), left, y + 6, WHITE);
+				context.text(font, font.plainSubstrByWidth(row.label.getString(), labelWidth), left, y + 6, WHITE);
 			}
 		}
 		// Scrollbar.
@@ -283,8 +282,8 @@ public abstract class OptionsScreen extends Screen {
 	}
 
 	@Override
-	public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-		super.render(context, mouseX, mouseY, delta);
+	public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
+		super.extractRenderState(context, mouseX, mouseY, delta);
 		// Hovering a label shows its description too.
 		int left = contentLeft(), right = contentRight();
 		for (int[] position : labelPositions) {
@@ -292,7 +291,7 @@ public abstract class OptionsScreen extends Screen {
 			if (row.description == null || row.header || row.wide) continue;
 			int y = position[1];
 			if (mouseX >= left && mouseX < right - CONTROL_WIDTH - 8 && mouseY >= y && mouseY < y + 20) {
-				context.drawOrderedTooltip(textRenderer, textRenderer.wrapLines(row.description, 220), mouseX, mouseY);
+				context.setTooltipForNextFrame(font, font.split(row.description, 220), mouseX, mouseY);
 			}
 		}
 	}
@@ -301,7 +300,7 @@ public abstract class OptionsScreen extends Screen {
 	public void showTab(int index) {
 		tab = index;
 		scroll = 0;
-		clearAndInit();
+		rebuildWidgets();
 	}
 
 	public int tabCount() {
@@ -309,8 +308,8 @@ public abstract class OptionsScreen extends Screen {
 	}
 
 	@Override
-	public void close() {
+	public void onClose() {
 		save();
-		client.setScreen(parent);
+		minecraft.gui.setScreen(parent);
 	}
 }

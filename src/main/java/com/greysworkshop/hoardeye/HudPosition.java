@@ -1,6 +1,6 @@
 package com.greysworkshop.hoardeye;
 
-import net.minecraft.text.Text;
+import net.minecraft.network.chat.Component;
 
 /** Where on screen the label is drawn. */
 public enum HudPosition {
@@ -23,8 +23,8 @@ public enum HudPosition {
 		this.align = align;
 	}
 
-	public Text getName() {
-		return Text.translatable("hoardeye.config.position." + key);
+	public Component getName() {
+		return Component.translatable("hoardeye.config.position." + key);
 	}
 
 	public HudPosition next() {

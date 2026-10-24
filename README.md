@@ -1,15 +1,16 @@
 # Hoard Eye
 
-A client-side Fabric mod for Minecraft 1.21.11 that remembers what's in your containers and helps you find things.
+A client-side Fabric mod for Minecraft 26.2 that remembers what's in your containers and helps you find things.
 It works on any server, because everything happens on your own game.
 
 By **PlayWit Creations**. (Called Container Peek before 3.0.0: your saved containers and settings carry over by themselves.)
 
 ## Installing
-1. Install [Fabric Loader](https://fabricmc.net/use/) for Minecraft **1.21.11**, plus
+1. Install [Fabric Loader](https://fabricmc.net/use/) for Minecraft **26.2** (it needs Java 25, which the launcher normally provides), plus
    [Fabric API](https://modrinth.com/mod/fabric-api).
-2. Get `hoard-eye-<version>+1.21.11.jar` from the [Releases](https://github.com/PlayWitIt/Hoard-Eye/releases) page
+2. Get `hoard-eye-<version>+26.2.jar` from the [Releases](https://github.com/PlayWitIt/Hoard-Eye/releases) page
    (or build it, see below), and put it in your `.minecraft/mods` folder. If you had Container Peek, remove its jar.
+   This is the 26.2 build; the 1.21.11 build is a separate jar.
 
 Works well with [Base Insurance](https://github.com/PlayWitIt/Base-Insurance) (rebuild materials are fetched from your
 storage) and [Naughty or Nice](https://github.com/PlayWitIt/Naughty-or-Nice). All three share the Mods panel (Right
@@ -29,5 +30,5 @@ Shift on the title screen).
 Base Insurance, Hoard Eye), so you can turn something off before you join a world, and opens each one's full settings.
 
 ## Building
-Requires JDK 21. Run `./gradlew build`; the jar goes to `build/libs/`.
+Requires JDK 25. Run `./gradlew build`; the jar goes to `build/libs/`.
 `./gradlew runSelfTest` runs a scripted in-game test that saves screenshots to `run/screenshots/`.
