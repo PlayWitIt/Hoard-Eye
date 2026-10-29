@@ -80,6 +80,8 @@ public class HoardEyeClient implements ClientModInitializer {
 	private KeyBinding searchKey;
 
 	private Target pendingOpen;
+	/** How many slots the clicked container's screen has (-1: unknown, a modded one). */
+	private int pendingOpenSlots;
 	private int pendingOpenTicks;
 	private BlockPos pendingPlace;
 	private Block pendingPlaceBlock;
@@ -111,8 +113,10 @@ public class HoardEyeClient implements ClientModInitializer {
 
 			// Right-clicking a container might open it; remember which, so we can match the screen.
 			Target target = resolve(clientWorld, hit.getBlockPos());
+			// Clicked something else: whatever opens next is that, not a container clicked before.
+			pendingOpen = target;
 			if (target != null) {
-				pendingOpen = target;
+				pendingOpenSlots = expectedSlots(clientWorld, hit.getBlockPos(), target.kind());
 				pendingOpenTicks = PENDING_TICKS;
 			}
 
@@ -138,8 +142,10 @@ public class HoardEyeClient implements ClientModInitializer {
 			String world = worldKey(client);
 			if (world == null || client.world == null) return;
 			Target target = pendingOpen;
-			String name = titleToName(screen.getTitle());
 			pendingOpen = null;
+			// Something else opened instead (a server's menu, say, on a locked chest): not this container.
+			if (pendingOpenSlots >= 0 && containerStacks(handled.getScreenHandler()).size() != pendingOpenSlots) return;
+			String name = titleToName(screen.getTitle());
 			String block = blockId(client.world, target);
 			// A fetch-route stop: show what to take, and head on to the next stop.
 			Fetch.Stop stop = Locator.routeStopAt(target.dimension(), target.pos());
@@ -155,6 +161,8 @@ public class HoardEyeClient implements ClientModInitializer {
 			ScreenEvents.remove(screen).register(closed -> {
 				Fetch.onClosed();
 				if (client.world == null || !world.equals(worldKey(client))) return;
+				// Closed before the contents arrived (lag): what's on record stays, rather than "empty".
+				if (handled.getScreenHandler().getRevision() == 0) return;
 				List<ItemStack> items = containerStacks(handled.getScreenHandler());
 				store.put(world, target.dimension(), target.pos(), name, items, client.world.getRegistryManager(), block, target.kind());
 				store.saveIfDirty();
@@ -167,6 +175,7 @@ public class HoardEyeClient implements ClientModInitializer {
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> client.execute(() -> {
 			pendingOpen = null;
 			pendingPlace = null;
+			Sight.clear();
 			store.saveIfDirty();
 		}));
 
@@ -273,10 +282,11 @@ public class HoardEyeClient implements ClientModInitializer {
 			}
 		}
 
-		// Once a second, forget containers that are certainly gone. Not just "no container there": servers with
-		// anti-xray send hidden chests and barrels as stone until you're close, which used to wipe whole bases. Gone
-		// is: the spot is air or liquid (anti-xray never fakes those), or you're looking right at it up close and it
-		// isn't a container. (A break while you're there is caught as it happens, in blockChanged.)
+		// Once a second, forget containers that are certainly gone. Not just "no container there": anti-xray sends
+		// hidden chests as stone, and chest hiders (anti-ESP) send air for every container you can't see, which used
+		// to wipe whole bases. Gone is: the spot is air or liquid and in plain view close by (or the server said it
+		// broke), or you're looking right at it up close and it isn't a container. (A break while you're there is
+		// caught as it happens, in blockChanged.)
 		if (ModConfig.INSTANCE.forgetBroken && ++cleanupTimer >= 20) {
 			cleanupTimer = 0;
 			Map<Long, NameStore.Entry> entries = store.dimension(world, dimension);
@@ -289,7 +299,8 @@ public class HoardEyeClient implements ClientModInitializer {
 				if (!client.world.isChunkLoaded(pos.getX() >> 4, pos.getZ() >> 4)) continue;
 				if (resolve(client.world, pos) != null) continue;
 				BlockState state = client.world.getBlockState(pos);
-				if (state.isAir() || !state.getFluidState().isEmpty() && !state.isSolidBlock(client.world, pos) || pos.equals(aimed)) {
+				boolean empty = state.isAir() || !state.getFluidState().isEmpty() && !state.isSolidBlock(client.world, pos);
+				if (empty && Sight.certain(client.world, client.player, pos) || pos.equals(aimed)) {
 					it.remove();
 					store.markDirty();
 				}
@@ -482,6 +493,8 @@ public class HoardEyeClient implements ClientModInitializer {
 		}
 		if (old.getBlock() == state.getBlock() || !ModConfig.INSTANCE.forgetBroken) return;
 		if (ContainerKind.of(world.getBlockEntity(pos)) == null) return;
+		// Out of sight with no word from the server that it broke: a hider hiding it, not a break.
+		if (!Sight.certain(world, client.player, pos)) return;
 		// Half of a double chest broken: the other half is a single chest now, kept under its own spot.
 		if (old.getBlock() instanceof ChestBlock && ChestBlock.getDoubleBlockType(old) != DoubleBlockProperties.Type.SINGLE) {
 			BlockPos other = pos.offset(ChestBlock.getFacing(old));
@@ -507,6 +520,15 @@ public class HoardEyeClient implements ClientModInitializer {
 			if (other.asLong() < pos.asLong()) pos = other;
 		}
 		return new Target(kind, dimensionKey(world), pos.toImmutable());
+	}
+
+	/** How many slots this container's screen shows: 54 for a double chest, the inventory's size otherwise. */
+	private static int expectedSlots(ClientWorld world, BlockPos pos, ContainerKind kind) {
+		if (kind == ContainerKind.ENDER_CHEST) return 27;
+		if (kind == ContainerKind.OTHER) return -1;
+		BlockState state = world.getBlockState(pos);
+		if (state.getBlock() instanceof ChestBlock && ChestBlock.getDoubleBlockType(state) != DoubleBlockProperties.Type.SINGLE) return 54;
+		return world.getBlockEntity(pos) instanceof net.minecraft.inventory.Inventory inventory ? inventory.size() : -1;
 	}
 
 	/** The container's own slots from an open screen, leaving out the player's inventory and crafter output. */
