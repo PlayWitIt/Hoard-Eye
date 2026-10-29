@@ -156,6 +156,11 @@ public final class Fetch {
 		openStop = null;
 	}
 
+	/** A route stop's container is open right now. */
+	public static boolean isOpen() {
+		return openStop != null;
+	}
+
 	/** Draws "take from here" above the container, and outlines the slots holding those items. */
 	public static void renderInScreen(HandledScreen<?> screen, DrawContext context) {
 		Stop stop = openStop;

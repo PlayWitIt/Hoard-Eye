@@ -181,7 +181,9 @@ public final class Locator {
 		String vertical = to.y > 3 ? "  ▲" + (int) to.y : to.y < -3 ? "  ▼" + (int) -to.y : "";
 		String more = targets.size() > 1 && route == null ? "  (+" + (targets.size() - 1) + ")" : "";
 
-		Text text = Text.literal(arrow + "  ").append(Text.literal(what).styled(s -> s.withColor(0xFFFFFF)))
+		// While a stop's container is open, the strip already points on: say it's the next one.
+		String shown = route != null && Fetch.isOpen() ? Text.translatable("hoardeye.fetch.next", what).getString() : what;
+		Text text = Text.literal(arrow + "  ").append(Text.literal(shown).styled(s -> s.withColor(0xFFFFFF)))
 				.append(Text.literal("  " + target.label + "  " + distance + "m" + vertical + more).styled(s -> s.withColor(0xBBBBBB)));
 		drawPill(context, font, text, centerX, y, COLOR, target.icon);
 	}
