@@ -58,6 +58,8 @@ public final class SelfTest {
 		ScreenEvents.AFTER_INIT.register((client, screen, w, h) -> {
 			if (started || !(screen instanceof TitleScreen)) return;
 			started = true;
+			// No "move with WASD" pop-up over the screenshots.
+			client.getTutorialManager().setStep(net.minecraft.client.tutorial.TutorialStep.NONE);
 			client.send(() -> openWorld(client));
 		});
 		ClientTickEvents.END_CLIENT_TICK.register(SelfTest::tick);
@@ -192,6 +194,8 @@ public final class SelfTest {
 			}
 			case 372 -> {
 				log("Marker: " + Locator.lastMarker);
+				check("markers that would overlap merge into one with a count (" + Locator.markersDrawn + " drawn for " + Locator.count() + ")",
+						Locator.markersDrawn >= 1 && Locator.markersDrawn < Locator.count());
 				screenshot(client, "6_locator_through_wall");
 			}
 			case 374 -> aimAt(client, origin.add(-40, 0, -40));

@@ -206,8 +206,12 @@ public final class Locator {
 		double halfW = w / 2.0, halfH = h / 2.0;
 		String dimension = HoardEyeClient.dimensionKey(client.world);
 		int margin = 18;
+		// Markers that would overlap become one, with a count: the nearest goes first, so it's the one shown.
+		List<int[]> placed = new ArrayList<>();
+		List<Target> order = new ArrayList<>(targets);
+		order.sort(java.util.Comparator.comparing((Target t) -> t != nearest).thenComparingDouble(t -> Vec3d.ofCenter(t.pos).squaredDistanceTo(eye)));
 
-		for (Target target : targets) {
+		for (Target target : order) {
 			if (!target.dimension.equals(dimension)) continue;
 			Vec3d d = Vec3d.ofCenter(target.pos).subtract(eye);
 			double cx = d.dotProduct(right), cy = d.dotProduct(up), cz = d.dotProduct(forward);
@@ -233,6 +237,18 @@ public final class Locator {
 			}
 			boolean main = target == nearest;
 			int x = (int) Math.round(sx), y = (int) Math.round(sy);
+			int[] under = null;
+			for (int[] p : placed) {
+				if (Math.abs(p[0] - x) < 20 && Math.abs(p[1] - y) < 20) {
+					under = p;
+					break;
+				}
+			}
+			if (under != null) {
+				under[2]++;
+				continue;
+			}
+			placed.add(new int[] {x, y, 0});
 			int ring = main ? COLOR : 0xA040E0FF;
 			context.fill(x - 10, y - 10, x + 10, y + 10, main ? 0xB0101018 : 0x80101018);
 			context.drawStrokedRectangle(x - 10, y - 10, 20, 20, ring);
@@ -247,7 +263,7 @@ public final class Locator {
 				context.drawTextWithShadow(font, distance, x - tw / 2, labelY, 0xFFFFFFFF);
 			}
 			lastMarker = (onScreen ? "on-screen" : "edge") + " at " + x + "," + y + " (camera yaw " + (int) camera.getYaw() + ")";
-			if (!onScreen) {
+if (!onScreen) {
 				// An arrow just inside the marker, pointing off-screen towards the container.
 				Matrix3x2fStack matrices = context.getMatrices();
 				matrices.pushMatrix();
@@ -257,9 +273,25 @@ public final class Locator {
 				matrices.popMatrix();
 			}
 		}
+		drawCounts(context, font, placed);
+		markersDrawn = placed.size();
 	}
 
 	/** A rounded-looking dark strip with an icon and text, centred on {@code centerX}. */
+	/** "+2" on each marker standing for more than one container. */
+	private static void drawCounts(DrawContext context, TextRenderer font, List<int[]> placed) {
+		for (int[] p : placed) {
+			if (p[2] == 0) continue;
+			String more = "+" + p[2];
+			int tw = font.getWidth(more);
+			context.fill(p[0] + 6, p[1] - 14, p[0] + 10 + tw, p[1] - 4, 0xE0101018);
+			context.drawTextWithShadow(font, more, p[0] + 8, p[1] - 13, COLOR);
+		}
+	}
+
+	/** Markers on screen the last time they were drawn; for the self-test. */
+	public static int markersDrawn;
+
 	private static void drawPill(DrawContext context, TextRenderer font, Text text, int centerX, int y, int accent, ItemStack icon) {
 		int iconSpace = icon.isEmpty() ? 0 : 18;
 		int width = font.getWidth(text) + iconSpace + 12;
