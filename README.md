@@ -21,7 +21,9 @@ Shift on the title screen).
 - **Fetch list:** add items with **+ Fetch**, and Hoard Eye plans a route through your containers (nearest first, no back-tracking). At each stop it shows what to take and highlights those slots.
 - **Shulker box tooltips** show the contents as a 9×3 grid of icons.
 - **Remembers through anti-xray:** servers that hide chests as stone until you're close don't make it forget your storage.
-  A container is only forgotten when it's really gone: you saw it broken, its spot is now air, or you look right at it and it isn't there.
+  A container is only forgotten when it's really gone: you see its spot empty up close, the server says it broke, or you
+  look right at it and it isn't there. Servers that hide chests you can't see (anti-ESP) don't wipe your storage either,
+  and a server menu that pops up instead of a chest is never saved as that chest.
 - **Detailed settings** (Mod Menu or a key you bind): the label's look and position, which container types get labels, the locator, and your saved data.
 
 **Mods panel:** press **Right Shift** on the title screen, the server or world list, or the pause menu, or click
