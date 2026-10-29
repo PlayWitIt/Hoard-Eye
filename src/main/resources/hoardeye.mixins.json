@@ -3,6 +3,7 @@
 	"package": "com.greysworkshop.hoardeye.mixin",
 	"compatibilityLevel": "JAVA_25",
 	"client": [
+		"ClientPlayNetworkHandlerMixin",
 		"ClientWorldMixin",
 		"HandledScreenAccessor",
 		"ItemStackMixin"

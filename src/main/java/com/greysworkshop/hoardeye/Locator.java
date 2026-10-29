@@ -175,7 +175,9 @@ public final class Locator {
 		String vertical = to.y > 3 ? "  ▲" + (int) to.y : to.y < -3 ? "  ▼" + (int) -to.y : "";
 		String more = targets.size() > 1 && route == null ? "  (+" + (targets.size() - 1) + ")" : "";
 
-		Component text = Component.literal(arrow + "  ").append(Component.literal(what).withStyle(s -> s.withColor(0xFFFFFF)))
+		// While a stop's container is open, the strip already points on: say it's the next one.
+		String shown = route != null && Fetch.isOpen() ? Component.translatable("hoardeye.fetch.next", what).getString() : what;
+		Component text = Component.literal(arrow + "  ").append(Component.literal(shown).withStyle(s -> s.withColor(0xFFFFFF)))
 				.append(Component.literal("  " + target.label + "  " + distance + "m" + vertical + more).withStyle(s -> s.withColor(0xBBBBBB)));
 		drawPill(context, font, text, centerX, y, COLOR, target.icon);
 	}

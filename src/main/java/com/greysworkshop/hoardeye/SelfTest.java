@@ -44,6 +44,8 @@ public final class SelfTest {
 	private static int passed, failed;
 	private static BlockPos origin;
 	private static final List<BlockPos> containers = new ArrayList<>();
+	private static net.minecraft.world.level.block.state.BlockState hiddenState;
+	private static int beforeItems;
 
 	private SelfTest() {}
 
@@ -291,7 +293,52 @@ public final class SelfTest {
 				check("server addresses are one server however they're typed",
 						HoardEyeClient.normalizeAddress("2B2T.org:25565.").equals(HoardEyeClient.normalizeAddress("2b2t.org")));
 			}
+			// ---- Servers that hide chests you can't see (anti-ESP) send air for them ----
 			case 690 -> {
+				log("Behind the wall, out of sight: the server hides the first chest (sends air)");
+				client.getSingleplayerServer().execute(() -> client.getSingleplayerServer().getPlayerList().getPlayers().get(0)
+						.teleportTo(origin.getX() - 13.5, origin.getY(), origin.getZ() - 13.5));
+			}
+			case 720 -> {
+				hiddenState = client.level.getBlockState(containers.get(0));
+				client.level.setServerVerifiedBlockState(containers.get(0), Blocks.AIR.defaultBlockState(), 19);
+			}
+			case 770 -> {
+				check("a chest a hider turns to air, out of sight, is still remembered", known(client, containers.get(0)));
+				client.level.setServerVerifiedBlockState(containers.get(0), hiddenState, 19);
+				client.getSingleplayerServer().execute(() -> client.getSingleplayerServer().getPlayerList().getPlayers().get(0)
+						.teleportTo(origin.getX() + 0.5, origin.getY(), origin.getZ() + 0.5));
+			}
+			// ---- A server menu opening instead of the chest clicked ----
+			case 800 -> {
+				log("A block on top of the chest stops it opening; the server opens its own menu instead");
+				NameStore.Entry before = HoardEyeClient.INSTANCE.store().get(HoardEyeClient.worldKey(client), HoardEyeClient.dimensionKey(client.level), containers.get(0));
+				beforeItems = before == null || before.items == null ? -1 : before.items.size();
+				server(client, w -> w.setBlockAndUpdate(containers.get(0).above(), Blocks.STONE.defaultBlockState()));
+			}
+			case 810 -> {
+				BlockPos pos = containers.get(0);
+				client.gameMode.useItemOn(client.player, InteractionHand.MAIN_HAND, new BlockHitResult(Vec3.atCenterOf(pos).add(0, 0.5, 0), Direction.UP, pos, false));
+				client.getSingleplayerServer().execute(() -> {
+					var player = client.getSingleplayerServer().getPlayerList().getPlayers().get(0);
+					var menu = new net.minecraft.world.SimpleContainer(54);
+					menu.setItem(0, new ItemStack(Items.DIRT, 1));
+					player.openMenu(new net.minecraft.world.SimpleMenuProvider(
+							(id, inv, p) -> net.minecraft.world.inventory.ChestMenu.sixRows(id, inv, menu), Component.literal("Server Menu")));
+				});
+			}
+			case 840 -> {
+				check("the server's menu opened (" + client.gui.screen() + ")", client.gui.screen() instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<?>);
+				client.player.closeContainer();
+			}
+			case 850 -> {
+				NameStore.Entry after = HoardEyeClient.INSTANCE.store().get(HoardEyeClient.worldKey(client), HoardEyeClient.dimensionKey(client.level), containers.get(0));
+				check("a server menu that opens instead isn't taken for the chest (" + (after == null ? "none" : "\"" + after.name + "\", "
+						+ (after.items == null ? -1 : after.items.size()) + " stacks") + ")",
+						after != null && after.name.isEmpty() && (after.items == null ? -1 : after.items.size()) == beforeItems);
+				server(client, w -> w.setBlockAndUpdate(containers.get(0).above(), Blocks.AIR.defaultBlockState()));
+			}
+			case 860 -> {
 				log("DONE: " + passed + " passed, " + failed + " failed");
 				client.stop();
 			}

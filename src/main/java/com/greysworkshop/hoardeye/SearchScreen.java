@@ -765,6 +765,8 @@ public class SearchScreen extends Screen {
 		int textX = x + 38;
 		context.text(font, font.plainSubstrByWidth(group.name, rightX1 - textX - 70), textX, y + 4, WHITE);
 		String summary = Component.translatable("hoardeye.search.group_summary", fmt(group.total), group.spread()).getString();
+		// Never cut off mid-word: a shorter way of saying it when there's no room.
+		if (font.width(summary) > rightX1 - textX - 70) summary = Component.translatable("hoardeye.search.group_summary_short", fmt(group.total), group.spread()).getString();
 		context.text(font, font.plainSubstrByWidth(summary, rightX1 - textX - 70), textX, y + 17, GOLD);
 
 		int top = bodyTop + 50;
