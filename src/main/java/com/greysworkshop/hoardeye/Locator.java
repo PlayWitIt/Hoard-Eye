@@ -200,8 +200,12 @@ public final class Locator {
 		double halfW = w / 2.0, halfH = h / 2.0;
 		String dimension = HoardEyeClient.dimensionKey(client.level);
 		int margin = 18;
+		// Markers that would overlap become one, with a count: the nearest goes first, so it's the one shown.
+		List<int[]> placed = new ArrayList<>();
+		List<Target> order = new ArrayList<>(targets);
+		order.sort(java.util.Comparator.comparing((Target t) -> t != nearest).thenComparingDouble(t -> Vec3.atCenterOf(t.pos).distanceToSqr(eye)));
 
-		for (Target target : targets) {
+		for (Target target : order) {
 			if (!target.dimension.equals(dimension)) continue;
 			Vec3 d = Vec3.atCenterOf(target.pos).subtract(eye);
 			double cx = d.dot(right), cy = d.dot(up), cz = d.dot(forward);
@@ -227,6 +231,18 @@ public final class Locator {
 			}
 			boolean main = target == nearest;
 			int x = (int) Math.round(sx), y = (int) Math.round(sy);
+			int[] under = null;
+			for (int[] p : placed) {
+				if (Math.abs(p[0] - x) < 20 && Math.abs(p[1] - y) < 20) {
+					under = p;
+					break;
+				}
+			}
+			if (under != null) {
+				under[2]++;
+				continue;
+			}
+			placed.add(new int[] {x, y, 0});
 			int ring = main ? COLOR : 0xA040E0FF;
 			context.fill(x - 10, y - 10, x + 10, y + 10, main ? 0xB0101018 : 0x80101018);
 			context.outline(x - 10, y - 10, 20, 20, ring);
@@ -251,7 +267,23 @@ public final class Locator {
 				matrices.popMatrix();
 			}
 		}
+		drawCounts(context, font, placed);
+		markersDrawn = placed.size();
 	}
+
+	/** "+2" on each marker standing for more than one container. */
+	private static void drawCounts(GuiGraphicsExtractor context, Font font, List<int[]> placed) {
+		for (int[] p : placed) {
+			if (p[2] == 0) continue;
+			String more = "+" + p[2];
+			int tw = font.width(more);
+			context.fill(p[0] + 6, p[1] - 14, p[0] + 10 + tw, p[1] - 4, 0xE0101018);
+			context.text(font, more, p[0] + 8, p[1] - 13, COLOR);
+		}
+	}
+
+	/** Markers on screen the last time they were drawn; for the self-test. */
+	public static int markersDrawn;
 
 	/** A rounded-looking dark strip with an icon and text, centred on {@code centerX}. */
 	private static void drawPill(GuiGraphicsExtractor context, Font font, Component text, int centerX, int y, int accent, ItemStack icon) {

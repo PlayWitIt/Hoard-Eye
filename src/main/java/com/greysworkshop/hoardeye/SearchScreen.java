@@ -690,7 +690,10 @@ public class SearchScreen extends Screen {
 			case CONTAINERS -> "hoardeye.search.hint_containers";
 			case FETCH -> "hoardeye.fetch.hint";
 		}).getString();
-		context.text(font, font.plainSubstrByWidth(hint, width - 2 * PAD - (Locator.active() ? 108 : 0)), PAD, height - 18, DIM);
+		// Whole phrases only: drop the last "·" part until it fits, never cut one off mid-word.
+		int room = width - 2 * PAD - (Locator.active() ? 108 : 0);
+		while (font.width(hint) > room && hint.lastIndexOf(" · ") > 0) hint = hint.substring(0, hint.lastIndexOf(" · "));
+		context.text(font, ellipsize(font, hint, room), PAD, height - 18, DIM);
 	}
 
 	@Override
@@ -851,7 +854,7 @@ public class SearchScreen extends Screen {
 				// Right to left: chips, stored, wanted; the name gets whatever room is left.
 				int stockX = x - 6 - font.width(stock);
 				int countX = stockX - 6 - font.width(count);
-				context.text(font, font.plainSubstrByWidth(want.name, Math.max(0, countX - leftX0 - 30)), leftX0 + 25, y + 6, WHITE);
+				context.text(font, ellipsize(font, want.name, Math.max(0, countX - leftX0 - 30)), leftX0 + 25, y + 6, WHITE);
 				context.text(font, count, countX, y + 6, GOLD);
 				context.text(font, stock, stockX, y + 6, have >= want.count ? 0xFF55FF55 : 0xFFFF7070);
 				x = chip(context, x, y + 3, "−", 0xFFFFAA40, mouseX, mouseY, () -> Fetch.adjust(want.key, -1));
@@ -861,6 +864,12 @@ public class SearchScreen extends Screen {
 			y += ROW;
 		}
 		context.disableScissor();
+	}
+
+	/** The text, or as much as fits followed by "…", so a cut is never mistaken for the whole name. */
+	static String ellipsize(Font font, String text, int width) {
+		if (font.width(text) <= width) return text;
+		return font.plainSubstrByWidth(text, Math.max(0, width - font.width("…"))).stripTrailing() + "…";
 	}
 
 	private int chip(GuiGraphicsExtractor context, int x, int y, String label, int color, int mouseX, int mouseY, Runnable action) {

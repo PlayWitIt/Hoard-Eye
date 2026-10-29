@@ -172,7 +172,7 @@
 	"hoardeye.fetch.stored": "%s stored",
 	"hoardeye.fetch.empty": "Your fetch list is empty. In the Items view, select something and press + Fetch to add a stack of it.",
 	"hoardeye.fetch.route_empty": "Add items to plan a route through your containers, nearest first.",
-	"hoardeye.fetch.hint": "− / + change amounts by a stack · Start route walks you to each container and shows what to take there",
+	"hoardeye.fetch.hint": "−/+ a stack · Start route walks you to each container and shows what to take",
 	"hoardeye.fetch.stop": "Stop %s/%s · take %s",
 	"hoardeye.fetch.next": "Next: %s",
 	"hoardeye.fetch.take_here": "Take from here:",
