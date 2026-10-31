@@ -3,6 +3,7 @@ package com.greysworkshop.hoardeye;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
@@ -69,7 +70,7 @@ import java.util.function.Function;
  */
 public final class ModsPanel extends Screen {
 	/** Raised when the panel changes, so the newest copy among the installed mods is the one that draws it. */
-	private static final int VERSION = 2;
+	private static final int VERSION = 3;
 	private static final String MODS = "playwit:mods_panel_entries";
 	private static final String OWNER = "playwit:mods_panel_owner";
 	private static final String STREAM_SAFE = "playwit:stream_safe";
@@ -100,7 +101,6 @@ public final class ModsPanel extends Screen {
 	/** Something waiting for a second click to confirm ("delete:Name", "restore:file"). */
 	private String confirm;
 	private List<Path> backupList;
-	private volatile boolean backingUp;
 
 	private record Hit(int x0, int y0, int x1, int y1, Runnable run) {
 		boolean has(double x, double y) {
@@ -159,7 +159,19 @@ public final class ModsPanel extends Screen {
 		return false;
 	}
 
-	void testOpenSettings() {
+	void testScroll(double to) {
+		scroll = to;
+	}
+
+	void testShowRemote(PanelCloud.Service service) {
+		loadRemote(service);
+	}
+
+	void testRestoreFromCloud(PanelCloud.Service service, PanelCloud.Remote r) {
+		restoreFromCloud(service, r, "cloud:" + service.key + ":" + r.id());
+	}
+
+		void testOpenSettings() {
 		openSettings(mods.get(picked));
 	}
 
@@ -213,6 +225,20 @@ public final class ModsPanel extends Screen {
 				HoardEyeClient.LOGGER.error("Could not apply the mod profile", e);
 			}
 		}));
+		// Backups off this computer: every day you play (checked each minute), and to the folder when you quit. Each copy
+		// of the panel registers this; only the one that draws the panel acts.
+		int[] ticks = {0};
+		ClientTickEvents.END_CLIENT_TICK.register(client -> {
+			if (++ticks[0] < 20 * 60) return;
+			ticks[0] = 0;
+			if (owned() && PanelBackups.due()) {
+				List<String> paths = allDataPaths();
+				Util.getIoWorkerExecutor().execute(() -> PanelBackups.run(paths, true, false));
+			}
+		});
+		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
+			if (owned() && PanelBackups.folder() != null && !PanelBackups.busy()) PanelBackups.run(allDataPaths(), true, true);
+		});
 		// Stream-safe mode: one key for all the mods, set up by whichever of them starts first.
 		share.putIfAbsent(KEY_OWNER, ME);
 		if (ME.equals(share.get(KEY_OWNER))) {
@@ -695,6 +721,50 @@ public final class ModsPanel extends Screen {
 		ry = para(context, "A backup holds everything your PlayWit mods keep: lists, notes, chat logs, recordings, bases, maps, "
 				+ "containers, settings and profiles. Restoring one happens when you next start the game; what you have now is backed up first.",
 				lx + 10, ry, cw, GREY) + 8;
+
+		// Off this computer: a synced folder, Google Drive, OneDrive.
+		context.drawText(textRenderer, Text.literal("Keep a copy off this computer").styled(st -> st.withBold(true)), lx + 10, ry, TEXT, false);
+		ry += 12;
+		ry = para(context, "One goes there every day you play, and to the folder when you quit (the last " + PanelBackups.KEEP
+				+ " are kept). On a new computer, connect the same place and restore from it.", lx + 10, ry, cw, DIM) + 6;
+		Path folder = PanelBackups.folder();
+		context.drawText(textRenderer, "Folder", lx + 10, ry + 4, TEXT, false);
+		String shown = folder == null ? "Not set" : folder.toString();
+		int bx = lx + lw - 10;
+		if (folder != null) {
+			bx -= textRenderer.getWidth("Off") + 12;
+			button(context, "Off", bx, ry, mouseX, mouseY, listTop, listBottom, false, () -> {
+				PanelBackups.setFolder(null);
+				say("Backups won't be copied to a folder.", GREY);
+			});
+			bx -= 4;
+		}
+		bx -= textRenderer.getWidth("Choose…") + 12;
+		button(context, "Choose…", bx, ry, mouseX, mouseY, listTop, listBottom, folder == null, this::chooseFolder);
+		ry += 19;
+		context.drawText(textRenderer, trimFront(shown, cw - 10), lx + 20, ry, folder == null ? DIM : GREY, false);
+		ry += 13;
+		// Folders a cloud app keeps in sync, one click to use.
+		Map<String, Path> synced = PanelBackups.syncedFolders();
+		if (!synced.isEmpty()) {
+			int sx = lx + 20;
+			for (Map.Entry<String, Path> e : synced.entrySet()) {
+				if (e.getValue().equals(folder)) continue;
+				String label = "Use " + e.getKey();
+				if (sx + textRenderer.getWidth(label) + 12 > lx + lw - 10) break;
+				Path to = e.getValue();
+				sx += button(context, label, sx, ry, mouseX, mouseY, listTop, listBottom, false, () -> useFolder(to)) + 4;
+			}
+			ry += 20;
+		}
+		for (PanelCloud.Service service : PanelCloud.Service.values()) ry = cloudRow(context, service, lx, ry, lw, listTop, listBottom, mouseX, mouseY);
+
+		// This computer.
+		ry += 4;
+		context.drawText(textRenderer, Text.literal("On this computer").styled(st -> st.withBold(true)), lx + 10, ry + 4, TEXT, false);
+		String fromFile = "Restore from a file…";
+		button(context, fromFile, lx + lw - 10 - textRenderer.getWidth(fromFile) - 12, ry, mouseX, mouseY, listTop, listBottom, false, this::restoreFromFile);
+		ry += 20;
 		if (backupList.isEmpty()) ry = para(context, "No backups yet.", lx + 10, ry, cw, DIM) + 4;
 		for (Path file : backupList) {
 			String name = file.getFileName().toString().replaceFirst("\\.zip$", "");
@@ -706,10 +776,10 @@ public final class ModsPanel extends Screen {
 			}
 			boolean pending = PanelData.restorePendingFor(file);
 			context.drawText(textRenderer, textRenderer.trimToWidth(name, cw - 150), lx + 10, ry + 4, TEXT, false);
-			context.drawText(textRenderer, pending ? "Restores when you restart" : String.format(Locale.ROOT, "%.1f MB", size / 1048576.0),
+			context.drawText(textRenderer, pending ? "Restores when you restart" : size(size),
 					lx + 10, ry + 15, pending ? ACCENT : DIM, false);
 			String restore = "restore:" + file, delete = "delete:" + file;
-			int bx = lx + lw - 10;
+			bx = lx + lw - 10;
 			String dl = delete.equals(confirm) ? "Sure? Delete" : "Delete";
 			bx -= textRenderer.getWidth(dl) + 12;
 			button(context, dl, bx, ry + 4, mouseX, mouseY, listTop, listBottom, false, () -> {
@@ -730,19 +800,18 @@ public final class ModsPanel extends Screen {
 			String rl = pending ? "Cancel restore" : restore.equals(confirm) ? "Sure? Restore" : "Restore";
 			bx -= textRenderer.getWidth(rl) + 16;
 			button(context, rl, bx, ry + 4, mouseX, mouseY, listTop, listBottom, !pending && restore.equals(confirm), () -> {
-				try {
-					if (pending) {
+				if (pending) {
+					try {
 						PanelData.cancelRestore();
 						say("Restore cancelled.", GREY);
-					} else if (!restore.equals(confirm)) {
-						confirm = restore;
-						return;
-					} else {
-						PanelData.restoreAtNextStart(file, dataPaths());
-						say("Restart the game to finish restoring. What you have now is backed up first.", ACCENT);
+					} catch (IOException e) {
+						say("Couldn't cancel it: " + e.getMessage(), RED);
 					}
-				} catch (IOException e) {
-					say("Couldn't set up the restore: " + e.getMessage(), RED);
+				} else if (!restore.equals(confirm)) {
+					confirm = restore;
+					return;
+				} else {
+					restoreLater(file);
 				}
 				confirm = null;
 			});
@@ -755,12 +824,13 @@ public final class ModsPanel extends Screen {
 		scrollbar(context, lx, lw, listTop, listBottom);
 
 		context.fill(lx, listBottom, lx + lw, listBottom + 1, EDGE);
-		int by = listBottom + 6, bx = lx + lw - 10;
-		String now = backingUp ? "Backing up…" : "Back up now", folder = "Open folder";
+		int by = listBottom + 6;
+		bx = lx + lw - 10;
+		String now = PanelBackups.busy() ? "Backing up…" : "Back up now", open = "Open folder";
 		bx -= textRenderer.getWidth(now) + 12;
 		button(context, now, bx, by + 1, mouseX, mouseY, by, by + 18, true, this::backUpNow);
-		bx -= textRenderer.getWidth(folder) + 16;
-		button(context, folder, bx, by + 1, mouseX, mouseY, by, by + 18, false, () -> {
+		bx -= textRenderer.getWidth(open) + 16;
+		button(context, open, bx, by + 1, mouseX, mouseY, by, by + 18, false, () -> {
 			try {
 				Files.createDirectories(PanelData.backups());
 			} catch (IOException ignored) {
@@ -768,13 +838,217 @@ public final class ModsPanel extends Screen {
 			}
 			Util.getOperatingSystem().open(PanelData.backups());
 		});
+		// A backup running in the background says how it went.
+		if (PanelBackups.status != null && !PanelBackups.status.equals(lastBackupStatus)) {
+			lastBackupStatus = PanelBackups.status;
+			if (!PanelBackups.busy()) {
+				status = PanelBackups.status;
+				statusColor = PanelBackups.failed ? RED : ON;
+				backupList = null;
+			} else {
+				status = PanelBackups.status;
+				statusColor = GREY;
+			}
+		}
 		drawStatus(context, lx, lw, listBottom);
+	}
+
+	/** One cloud service: whether it's connected, Connect or Disconnect, and its backups when shown. Returns the y below. */
+	private int cloudRow(DrawContext context, PanelCloud.Service service, int lx, int ry, int lw, int listTop, int listBottom, int mouseX, int mouseY) {
+		boolean configured = PanelCloud.configured(service), connected = configured && PanelCloud.connected(service);
+		context.drawText(textRenderer, service.label, lx + 10, ry + 4, TEXT, false);
+		String account = PanelCloud.account(service);
+		String state = !configured ? "Not set up in this version yet" : signingIn == service ? "Finish signing in in your browser…"
+				: connected ? (account.isEmpty() ? "Connected" : account) : "Not connected";
+		int bx = lx + lw - 10;
+		if (configured && signingIn != service) {
+			String connect = connected ? (("disconnect:" + service.key).equals(confirm) ? "Sure? Disconnect" : "Disconnect") : "Connect";
+			bx -= textRenderer.getWidth(connect) + 12;
+			button(context, connect, bx, ry, mouseX, mouseY, listTop, listBottom, !connected, () -> {
+				if (connected) {
+					if (!("disconnect:" + service.key).equals(confirm)) {
+						confirm = "disconnect:" + service.key;
+						return;
+					}
+					confirm = null;
+					try {
+						PanelCloud.disconnect(service);
+						remote.remove(service);
+						say("Disconnected " + service.label + ". Backups already there stay there.", GREY);
+					} catch (IOException e) {
+						say("Couldn't disconnect: " + e.getMessage(), RED);
+					}
+				} else {
+					connect(service);
+				}
+			});
+			if (connected) {
+				String show = remote.containsKey(service) ? "Hide backups" : "Backups there";
+				bx -= textRenderer.getWidth(show) + 16;
+				button(context, show, bx, ry, mouseX, mouseY, listTop, listBottom, false, () -> {
+					if (remote.containsKey(service)) remote.remove(service);
+					else loadRemote(service);
+				});
+			}
+		}
+		ry += 19;
+		context.drawText(textRenderer, textRenderer.trimToWidth(state, lw - 30), lx + 20, ry, connected ? GREY : DIM, false);
+		ry += 13;
+		List<PanelCloud.Remote> list = remote.get(service);
+		if (list == null) return ry;
+		if (list.isEmpty()) {
+			ry = para(context, loadingRemote == service ? "Looking…" : "No backups there yet.", lx + 20, ry, lw - 30, DIM) + 4;
+			return ry;
+		}
+		for (PanelCloud.Remote r : list) {
+			String name = r.name().replaceFirst("\\.zip$", "");
+			String key = "cloud:" + service.key + ":" + r.id();
+			String rl = key.equals(downloading) ? "Downloading…" : key.equals(confirm) ? "Sure? Restore" : "Restore";
+			int rx = lx + lw - 10 - textRenderer.getWidth(rl) - 12;
+			context.drawText(textRenderer, textRenderer.trimToWidth(name, rx - lx - 26), lx + 20, ry + 1, GREY, false);
+			context.drawText(textRenderer, size(r.size()), lx + 20, ry + 11, DIM, false);
+			button(context, rl, rx, ry, mouseX, mouseY, listTop, listBottom, key.equals(confirm), () -> {
+				if (downloading != null) return;
+				if (!key.equals(confirm)) {
+					confirm = key;
+					return;
+				}
+				confirm = null;
+				restoreFromCloud(service, r, key);
+			});
+			ry += 24;
+		}
+		return ry + 4;
+	}
+
+	private static String size(long bytes) {
+		return bytes < 100 * 1024 ? Math.max(1, (bytes + 512) / 1024) + " KB" : String.format(Locale.ROOT, "%.1f MB", bytes / 1048576.0);
+	}
+
+	/** {@code s} cut from the front to fit (a path: its end says most). */
+	private String trimFront(String s, int w) {
+		if (textRenderer.getWidth(s) <= w) return s;
+		String cut = s;
+		while (cut.length() > 1 && textRenderer.getWidth("…" + cut) > w) cut = cut.substring(1);
+		return "…" + cut;
+	}
+
+	/** Cloud backups being shown, per service (an empty list while it looks). */
+	private final Map<PanelCloud.Service, List<PanelCloud.Remote>> remote = new java.util.EnumMap<>(PanelCloud.Service.class);
+	private volatile PanelCloud.Service loadingRemote, signingIn;
+	private volatile String downloading;
+	private String lastBackupStatus;
+
+	private void connect(PanelCloud.Service service) {
+		if (signingIn != null) return;
+		signingIn = service;
+		say("Sign in to " + service.label + " in the browser that opened.", GREY);
+		Util.getIoWorkerExecutor().execute(() -> {
+			try {
+				PanelCloud.connect(service);
+				client.execute(() -> say("Connected " + service.label + ". Backups go there every day you play; Back up now sends one now.", ON));
+			} catch (IOException | RuntimeException e) {
+				client.execute(() -> say("Couldn't connect " + service.label + ": " + e.getMessage(), RED));
+			} finally {
+				signingIn = null;
+			}
+		});
+	}
+
+	private void loadRemote(PanelCloud.Service service) {
+		remote.put(service, List.of());
+		loadingRemote = service;
+		Util.getIoWorkerExecutor().execute(() -> {
+			try {
+				List<PanelCloud.Remote> list = PanelCloud.list(service);
+				client.execute(() -> {
+					if (remote.containsKey(service)) remote.put(service, list);
+				});
+			} catch (IOException | RuntimeException e) {
+				client.execute(() -> {
+					remote.remove(service);
+					say("Couldn't look in " + service.label + ": " + e.getMessage(), RED);
+				});
+			} finally {
+				loadingRemote = null;
+			}
+		});
+	}
+
+	private void restoreFromCloud(PanelCloud.Service service, PanelCloud.Remote r, String key) {
+		downloading = key;
+		say("Downloading " + r.name() + " from " + service.label + "…", GREY);
+		List<String> paths = dataPaths();
+		Util.getIoWorkerExecutor().execute(() -> {
+			try {
+				Path to = PanelData.backups().resolve(r.name());
+				PanelCloud.download(service, r, to);
+				client.execute(() -> {
+					backupList = null;
+					if (!PanelBackups.isBackup(to, paths)) say("That file isn't a PlayWit backup.", RED);
+					else restoreLater(to);
+				});
+			} catch (IOException | RuntimeException e) {
+				client.execute(() -> say("Couldn't download it: " + e.getMessage(), RED));
+			} finally {
+				downloading = null;
+			}
+		});
+	}
+
+	private void restoreLater(Path file) {
+		try {
+			PanelData.restoreAtNextStart(file, dataPaths());
+			say("Restart the game to finish restoring. What you have now is backed up first.", ACCENT);
+		} catch (IOException e) {
+			say("Couldn't set up the restore: " + e.getMessage(), RED);
+		}
+	}
+
+	/** Picks a backup file from anywhere (a USB stick, a cloud folder) and restores it at the next start. */
+	private void restoreFromFile() {
+		String picked = org.lwjgl.util.tinyfd.TinyFileDialogs.tinyfd_openFileDialog("Pick a PlayWit backup",
+				(PanelBackups.folder() != null ? PanelBackups.folder() : PanelData.backups()).toString() + java.io.File.separator, null, null, false);
+		if (picked == null) return;
+		Path file = Path.of(picked);
+		if (!PanelBackups.isBackup(file, dataPaths())) {
+			say("That file isn't a PlayWit backup.", RED);
+			return;
+		}
+		try {
+			Path in = PanelBackups.bringIn(file);
+			backupList = null;
+			restoreLater(in);
+		} catch (IOException e) {
+			say("Couldn't use it: " + e.getMessage(), RED);
+		}
+	}
+
+	private void chooseFolder() {
+		Path start = PanelBackups.folder() != null ? PanelBackups.folder() : Path.of(System.getProperty("user.home"));
+		String picked = org.lwjgl.util.tinyfd.TinyFileDialogs.tinyfd_selectFolderDialog("Where should backups go?", start.toString());
+		if (picked != null) useFolder(Path.of(picked));
+	}
+
+	private void useFolder(Path folder) {
+		try {
+			Files.createDirectories(folder);
+		} catch (IOException e) {
+			say("Can't use that folder: " + e.getMessage(), RED);
+			return;
+		}
+		PanelBackups.setFolder(folder);
+		say("Backups will be copied to " + folder + ". Back up now puts one there now.", ON);
 	}
 
 	/** What every installed mod keeps, plus the panel's own profiles. */
 	private List<String> dataPaths() {
+		return allDataPaths();
+	}
+
+	static List<String> allDataPaths() {
 		List<String> paths = new ArrayList<>();
-		for (Map<String, Object> mod : mods) {
+		for (Map<String, Object> mod : entries()) {
 			for (Object o : list(mod.get("data"))) paths.add(String.valueOf(o));
 		}
 		paths.add("playwit/profiles.json");
@@ -782,21 +1056,10 @@ public final class ModsPanel extends Screen {
 	}
 
 	private void backUpNow() {
-		if (backingUp) return;
-		backingUp = true;
+		if (PanelBackups.busy()) return;
 		List<String> paths = dataPaths();
 		say("Backing up…", GREY);
-		Util.getIoWorkerExecutor().execute(() -> {
-			try {
-				int n = PanelData.backUp(paths, PanelData.newBackupFile(null));
-				client.execute(() -> say("Backed up " + n + (n == 1 ? " file." : " files."), ON));
-			} catch (IOException e) {
-				client.execute(() -> say("Couldn't back up: " + e.getMessage(), RED));
-			} finally {
-				backingUp = false;
-				backupList = null;
-			}
-		});
+		Util.getIoWorkerExecutor().execute(() -> PanelBackups.run(paths, false, false));
 	}
 
 	private void say(String message, int color) {
