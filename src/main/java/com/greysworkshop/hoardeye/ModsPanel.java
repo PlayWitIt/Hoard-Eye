@@ -251,8 +251,10 @@ public final class ModsPanel extends Screen {
 		ScreenEvents.AFTER_INIT.register((client, screen, w, h) -> {
 			if (!owned() || !(screen instanceof TitleScreen || screen instanceof MultiplayerScreen || screen instanceof SelectWorldScreen
 					|| screen instanceof GameMenuScreen)) return;
-			// With Mod Menu its "Mods" button is the way in, and the hub is linked from each mod's settings there instead.
-			if (screen instanceof TitleScreen && !FabricLoader.getInstance().isModLoaded("modmenu")) {
+			// Always on the title screen: the PlayWit Hub button. Named for the hub (not "Mods"), so it reads as its own
+			// thing beside Mod Menu's mod list — switches, profiles, backups, offline — not a duplicate. Right Shift opens
+			// it too, and each mod's settings link to it.
+			if (screen instanceof TitleScreen) {
 				Screens.getButtons(screen).add(ButtonWidget.builder(Text.literal(NAME), b -> client.setScreen(new ModsPanel(screen)))
 						.dimensions(4, 4, 80, 20).tooltip(Tooltip.of(Text.literal(TIP)))
 						.build());
