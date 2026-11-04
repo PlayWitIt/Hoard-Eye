@@ -181,6 +181,11 @@ public abstract class OptionsScreen extends Screen {
 
 		addDrawableChild(ButtonWidget.builder(ScreenTexts.DONE, b -> close())
 				.dimensions(width / 2 - 100, height - 26, 200, 20).build());
+		// PlayWit Hub (switches, profiles and backups for all the PlayWit mods), unless this was opened from it.
+		if (!ModsPanel.isHub(parent)) {
+			addDrawableChild(ButtonWidget.builder(Text.literal(ModsPanel.NAME), b -> ModsPanel.openHub(this))
+					.dimensions(4, 4, 80, 20).tooltip(net.minecraft.client.gui.tooltip.Tooltip.of(Text.literal(ModsPanel.TIP))).build());
+		}
 	}
 
 	private int contentLeft() {

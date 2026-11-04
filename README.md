@@ -12,7 +12,7 @@ By **PlayWit Creations**. (Called Container Peek before 3.0.0: your saved contai
    (or build it, see below), and put it in your `.minecraft/mods` folder. If you had Container Peek, remove its jar.
 
 Works well with [Base Insurance](https://github.com/PlayWitIt/Base-Insurance) (rebuild materials are fetched from your
-storage) and [Naughty or Nice](https://github.com/PlayWitIt/Naughty-or-Nice). All three share the Mods panel (Right
+storage) and [Naughty or Nice](https://github.com/PlayWitIt/Naughty-or-Nice). All three share PlayWit Hub (Right
 Shift on the title screen).
 
 ## Features
@@ -26,8 +26,9 @@ Shift on the title screen).
   and a server menu that pops up instead of a chest is never saved as that chest.
 - **Detailed settings** (Mod Menu or a key you bind): the label's look and position, which container types get labels, the locator, and your saved data.
 
-**Mods panel:** press **Right Shift** on the title screen, the server or world list, or the pause menu, or click
-**Mods panel** at the top left of the title screen. It shows the main switches of every PlayWit mod you have (Naughty or Nice,
+**PlayWit Hub:** press **Right Shift** on the title screen, the server or world list, or the pause menu, or click
+**PlayWit Hub** at the top of each PlayWit mod's settings (from Mod Menu or in game). Without Mod Menu there's also a
+**PlayWit Hub** button at the top left of the title screen. It isn't a list of every mod (that's Mod Menu); it shows the main switches of every PlayWit mod you have (Naughty or Nice,
 Base Insurance, Hoard Eye), so you can turn something off before you join a world, and opens each one's full settings.
 Its **Backups** page saves everything the mods keep, and can keep a copy off the computer: in a folder you pick (one
 that Google Drive, OneDrive or Dropbox syncs puts it in the cloud), or uploaded to **Google Drive** or **OneDrive**

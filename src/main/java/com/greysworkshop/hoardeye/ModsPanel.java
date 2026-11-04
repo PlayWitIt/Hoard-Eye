@@ -54,8 +54,8 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 /**
- * The mods panel: Right Shift (or the button at the top left of the title screen) on the title screen, the server and
- * world lists and the pause menu opens one screen with the main switches of every PlayWit mod installed, and a way
+ * PlayWit Hub (the mods panel): Right Shift on the title screen, the server and world lists and the pause menu (or the
+ * button at the top left of the title screen when Mod Menu isn't installed, or the link in each mod's settings) opens one screen with the main switches of every PlayWit mod installed, and a way
  * into each one's full settings, so something can be turned off before joining a world. Also: profiles (switches saved
  * under a name, set by themselves when you join the servers you pick), backups of everything the mods keep, and
  * stream-safe mode (a key that hides coordinates in all the mods while you record or stream).
@@ -70,11 +70,14 @@ import java.util.function.Function;
  */
 public final class ModsPanel extends Screen {
 	/** Raised when the panel changes, so the newest copy among the installed mods is the one that draws it. */
-	private static final int VERSION = 3;
+	private static final int VERSION = 4;
 	private static final String MODS = "playwit:mods_panel_entries";
 	private static final String OWNER = "playwit:mods_panel_owner";
 	private static final String STREAM_SAFE = "playwit:stream_safe";
 	private static final String KEY_OWNER = "playwit:stream_safe_key_owner";
+	/** Function<Screen, Screen> that makes the newest copy's hub, for the links in each mod's settings (from version 4). */
+	private static final String OPEN = "playwit:hub_open";
+	public static final String NAME = "PlayWit Hub";
 	private static final String ME = VERSION + ":" + HoardEyeClient.MOD_ID;
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
@@ -117,7 +120,7 @@ public final class ModsPanel extends Screen {
 	}
 
 	private ModsPanel(Screen parent) {
-		super(Text.literal("Mods panel"));
+		super(Text.literal(NAME));
 		this.parent = parent;
 		this.mods = entries();
 		for (int i = 0; i < pages(); i++) {
@@ -175,6 +178,22 @@ public final class ModsPanel extends Screen {
 		openSettings(mods.get(picked));
 	}
 
+	/** The class of the copy that draws the hub. */
+	static Class<?> testOwnerClass() {
+		Object open = FabricLoader.getInstance().getObjectShare().get(OPEN);
+		@SuppressWarnings("unchecked") Screen hub = ((Function<Screen, Screen>) open).apply(null);
+		return hub.getClass();
+	}
+
+	/** A mod's full settings coming back to {@code parent}, as Mod Menu opens them. */
+	@SuppressWarnings("unchecked")
+	static Screen testSettings(String id, Screen parent) {
+		for (Map<String, Object> mod : entries()) {
+			if (id.equals(mod.get("id"))) return ((Function<Screen, Screen>) mod.get("settings")).apply(parent);
+		}
+		return null;
+	}
+
 	// ---- Sharing between the mods ----
 
 	@SuppressWarnings("unchecked")
@@ -197,17 +216,36 @@ public final class ModsPanel extends Screen {
 		return ME.equals(FabricLoader.getInstance().getObjectShare().get(OWNER));
 	}
 
+	/** The tooltip on the buttons that open the hub. */
+	public static final String TIP = "Switches, profiles and backups for all your PlayWit mods, and stream-safe mode. Right Shift opens it too.";
+
+	/** Opens the hub (the newest copy among the installed mods), coming back to {@code parent}. */
+	public static void openHub(Screen parent) {
+		Object open = FabricLoader.getInstance().getObjectShare().get(OPEN);
+		@SuppressWarnings("unchecked") Screen hub = open instanceof Function<?, ?> f ? ((Function<Screen, Screen>) f).apply(parent) : new ModsPanel(parent);
+		MinecraftClient.getInstance().setScreen(hub);
+	}
+
+	/** Whether {@code screen} is the hub (any mod's copy), so a settings screen opened from it needn't link back to it. */
+	public static boolean isHub(Screen screen) {
+		return screen != null && screen.getClass().getSimpleName().equals("ModsPanel");
+	}
+
 	/** Adds this mod to the panel, and offers to draw the panel (the newest copy does). */
 	public static void install(Map<String, Object> entry) {
 		ObjectShare share = FabricLoader.getInstance().getObjectShare();
 		entries().add(entry);
-		if (version(share.get(OWNER)) < VERSION) share.put(OWNER, ME);
+		if (version(share.get(OWNER)) < VERSION) {
+			share.put(OWNER, ME);
+			share.put(OPEN, (Function<Screen, Screen>) ModsPanel::new);
+		}
 		ScreenEvents.AFTER_INIT.register((client, screen, w, h) -> {
 			if (!owned() || !(screen instanceof TitleScreen || screen instanceof MultiplayerScreen || screen instanceof SelectWorldScreen
 					|| screen instanceof GameMenuScreen)) return;
-			if (screen instanceof TitleScreen) {
-				Screens.getButtons(screen).add(ButtonWidget.builder(Text.literal("Mods panel"), b -> client.setScreen(new ModsPanel(screen)))
-						.dimensions(4, 4, 80, 20).tooltip(Tooltip.of(Text.literal("Turn your mods' features on or off before you join a world. Right Shift opens it too.")))
+			// With Mod Menu its "Mods" button is the way in, and the hub is linked from each mod's settings there instead.
+			if (screen instanceof TitleScreen && !FabricLoader.getInstance().isModLoaded("modmenu")) {
+				Screens.getButtons(screen).add(ButtonWidget.builder(Text.literal(NAME), b -> client.setScreen(new ModsPanel(screen)))
+						.dimensions(4, 4, 80, 20).tooltip(Tooltip.of(Text.literal(TIP)))
 						.build());
 			}
 			ScreenKeyboardEvents.allowKeyPress(screen).register((s, key) -> {
@@ -388,7 +426,7 @@ public final class ModsPanel extends Screen {
 		for (Profile p : loadProfiles()) {
 			if (p.servers.stream().map(ModsPanel::server).noneMatch(here::equals)) continue;
 			int changed = apply(p);
-			client.inGameHud.getChatHud().addMessage(Text.literal("[Mods panel] ").formatted(Formatting.GOLD)
+			client.inGameHud.getChatHud().addMessage(Text.literal("[" + NAME + "] ").formatted(Formatting.GOLD)
 					.append(Text.literal("Profile \"" + p.name + "\" for this server: "
 							+ (changed == 0 ? "everything was already set." : changed + (changed == 1 ? " switch" : " switches") + " changed."))
 							.formatted(Formatting.GRAY)));
@@ -474,7 +512,7 @@ public final class ModsPanel extends Screen {
 		context.fill(x, y, x + w, y + h, PANEL);
 
 		// Header.
-		context.drawText(textRenderer, Text.literal("Mods panel").styled(s -> s.withBold(true)), x + 10, y + 10, TEXT, false);
+		context.drawText(textRenderer, Text.literal(NAME).styled(s -> s.withBold(true)), x + 10, y + 10, TEXT, false);
 		String hint = "Right Shift or Esc to close";
 		boolean overClose = mouseX >= x + w - 22 && mouseX < x + w - 4 && mouseY >= y + 5 && mouseY < y + 23;
 		if (textRenderer.getWidth(hint) + 120 < w) context.drawText(textRenderer, hint, x + w - 28 - textRenderer.getWidth(hint), y + 10, GREY, false);
