@@ -89,6 +89,7 @@ public final class SelfTest {
 		tick++;
 		switch (tick) {
 			case 100 -> {
+				updaterChecks();
 				// In a folder of its own, so it doesn't matter what the test's config folder had in it.
 				boolean carried = false;
 				try {
@@ -408,6 +409,44 @@ public final class SelfTest {
 	private static void screenshot(MinecraftClient client, String name) {
 		ScreenshotRecorder.saveScreenshot(client.runDirectory, "cp_" + name + ".png", client.getFramebuffer(), 1, message -> {});
 		log("Screenshot " + name);
+	}
+
+	/** Updating by itself: the version in a file name, picking this Minecraft's release, the real download, and the helper's swap. */
+	private static void updaterChecks() {
+		check("an update's version is read from its file name", "3.3.0".equals(UpdateCheck.versionOf("hoard-eye-3.3.0+1.21.11.jar.update"))
+				&& UpdateCheck.versionOf("base-insurance-1.0.0+1.21.11.jar") == null && UpdateCheck.newer("3.10.0", "3.9.2"));
+		String repo = "PlayWitIt/Hoard-Eye", dl = "https://github.com/" + repo + "/releases/download/";
+		com.google.gson.JsonArray list = com.google.gson.JsonParser.parseString("["
+				+ rel("v9.1.0-mc26.2", "hoard-eye-9.1.0+26.2.jar", false, dl) + "," + rel("v9.0.0", "hoard-eye-9.0.0+1.21.11.jar", false, dl) + ","
+				+ rel("v9.2.0", "hoard-eye-9.2.0+1.21.11.jar", true, dl) + "," + rel("v8.0.0", "hoard-eye-8.0.0+1.21.11.jar", false, dl) + "]").getAsJsonArray();
+		UpdateCheck.Release r121 = UpdateCheck.newest(list, repo, "1.21.11"), r262 = UpdateCheck.newest(list, repo, "26.2");
+		check("the newest release for this Minecraft is picked, not the other version's or a pre-release (" + (r121 == null ? null : r121.version()) + ")",
+				r121 != null && r121.version().equals("9.0.0") && r121.jarName().equals("hoard-eye-9.0.0+1.21.11.jar"));
+		check("and for 26.2 its own (" + (r262 == null ? null : r262.version()) + ")", r262 != null && r262.version().equals("9.1.0"));
+		try {
+			UpdateCheck.Release real = UpdateCheck.latest(repo, "1.21.11");
+			check("the real latest release is found on GitHub (" + (real == null ? null : real.jarName()) + ")", real != null && real.jarName().endsWith("+1.21.11.jar"));
+			java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("he-update-test");
+			if (real != null) {
+				java.nio.file.Path got = dir.resolve(real.jarName() + ".update");
+				UpdateCheck.download(real, got, HoardEyeClient.MOD_ID);
+				check("its jar downloads and matches GitHub's SHA-256 and its fabric.mod.json", UpdateCheck.verify(got, real.sha256(), HoardEyeClient.MOD_ID, real.version()));
+				check("a wrong hash is refused", !UpdateCheck.verify(got, "00", HoardEyeClient.MOD_ID, real.version()));
+			}
+			java.nio.file.Path old = dir.resolve("hoard-eye-1.0.0+1.21.11.jar"), update = dir.resolve("hoard-eye-1.1.0+1.21.11.jar.update"),
+					jar = dir.resolve("hoard-eye-1.1.0+1.21.11.jar");
+			java.nio.file.Files.writeString(old, "old");
+			java.nio.file.Files.writeString(update, "new");
+			check("the helper swaps an update in", UpdateSwap.swap(old, update, jar, 2000) && !java.nio.file.Files.exists(old)
+					&& !java.nio.file.Files.exists(update) && "new".equals(java.nio.file.Files.readString(jar)));
+		} catch (Exception e) {
+			check("updating by itself works (" + e + ")", false);
+		}
+	}
+
+	private static String rel(String tag, String jar, boolean pre, String dl) {
+		return "{\"tag_name\":\"" + tag + "\",\"draft\":false,\"prerelease\":" + pre + ",\"html_url\":\"https://github.com/PlayWitIt/Hoard-Eye/releases/tag/" + tag
+				+ "\",\"assets\":[{\"name\":\"" + jar + "\",\"browser_download_url\":\"" + dl + tag + "/" + jar + "\",\"digest\":\"sha256:ab\"}]}";
 	}
 
 	private static void check(String what, boolean ok) {

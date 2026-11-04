@@ -34,6 +34,12 @@ public final class ModConfig {
 	public enum StripPosition { TOP, BOTTOM }
 
 	public boolean enabled = true;
+	/** Update by itself from GitHub (see UpdateCheck). */
+	public boolean checkUpdates = true;
+	/** The version that ran last, so the first start after an update can say so. */
+	public String lastVersion = "";
+	/** Starts in a row with a downloaded update that never went in. */
+	public int updateTries = 0;
 	/** Record containers as you open and place them. Off: nothing new is remembered. */
 	public boolean rememberContainers = true;
 	/** Forget containers that are broken or picked up. */
@@ -120,6 +126,7 @@ public final class ModConfig {
 				if (loaded.nameColor == null) loaded.nameColor = NameColor.WHITE;
 				if (loaded.stripPosition == null) loaded.stripPosition = StripPosition.TOP;
 				if (loaded.hudPosition == null) loaded.hudPosition = HudPosition.BELOW_CROSSHAIR;
+				if (loaded.lastVersion == null) loaded.lastVersion = "";
 				loaded.migrateGroups();
 				INSTANCE = loaded;
 			}

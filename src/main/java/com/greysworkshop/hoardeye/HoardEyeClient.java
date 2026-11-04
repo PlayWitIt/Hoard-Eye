@@ -96,6 +96,11 @@ public class HoardEyeClient implements ClientModInitializer {
 		INSTANCE = this;
 		migrateOldFiles();
 		ModConfig.load();
+		try {
+			UpdateCheck.init();
+		} catch (Exception e) {
+			LOGGER.warn("Couldn't look for a downloaded update", e);
+		}
 		ModsPanel.install(panelEntry());
 		store.load();
 
@@ -230,6 +235,7 @@ public class HoardEyeClient implements ClientModInitializer {
 	}
 
 	private void tick(MinecraftClient client) {
+		UpdateCheck.tick(client);
 		while (configKey.wasPressed()) {
 			client.setScreen(new ConfigScreen(client.currentScreen));
 		}
@@ -597,7 +603,9 @@ public class HoardEyeClient implements ClientModInitializer {
 				ModsPanel.section("Finding"),
 				ModsPanel.toggle(Text.translatable(P + ".locator_markers"), Text.translatable(P + ".locator_markers.desc"), () -> c.locatorMarkers, v -> c.locatorMarkers = v),
 				ModsPanel.toggle(Text.translatable(P + ".locator_beam"), Text.translatable(P + ".locator_beam.desc"), () -> c.locatorBeam, v -> c.locatorBeam = v),
-				ModsPanel.toggle(Text.translatable(P + ".found_sound"), Text.translatable(P + ".found_sound.desc"), () -> c.foundSound, v -> c.foundSound = v));
+				ModsPanel.toggle(Text.translatable(P + ".found_sound"), Text.translatable(P + ".found_sound.desc"), () -> c.foundSound, v -> c.foundSound = v),
+				ModsPanel.section("Updates"),
+				ModsPanel.toggle(Text.translatable(P + ".check_updates"), Text.translatable(P + ".check_updates.desc"), () -> c.checkUpdates, v -> c.checkUpdates = v));
 		return java.util.Map.of("id", MOD_ID, "name", "Hoard Eye", "version", version, "icon", Identifier.of(MOD_ID, "icon.png"),
 				"settings", (java.util.function.Function<net.minecraft.client.gui.screen.Screen, net.minecraft.client.gui.screen.Screen>) ConfigScreen::new,
 				"save", (Runnable) ModConfig::save, "data", java.util.List.of("hoardeye.json", "hoardeye-config.json", "hoardeye-fetch.json"), "switches", switches);

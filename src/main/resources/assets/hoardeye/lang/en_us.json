@@ -147,6 +147,8 @@
 	"hoardeye.config.strip_position.top": "Top of screen",
 	"hoardeye.config.strip_position.bottom": "Above hotbar",
 	"hoardeye.config.found_sound": "Sound when found",
+	"hoardeye.config.check_updates": "Update by itself",
+	"hoardeye.config.check_updates.desc": "When a newer version is out on GitHub it downloads in the background, is checked, and goes in when you close the game. Nothing to click.",
 	"hoardeye.config.found_sound.desc": "Play a sound as you reach each container.",
 	"hoardeye.config.data_note": "Hoard Eye's memory is saved in config/hoardeye.json, separately for each server and world.",
 	"hoardeye.config.forget_world": "This server/world",

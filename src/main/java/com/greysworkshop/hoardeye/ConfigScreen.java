@@ -84,6 +84,7 @@ public class ConfigScreen extends OptionsScreen {
 					r.toggle("found_sound", () -> c.foundSound, v -> c.foundSound = v);
 				}),
 				new Tab("data", r -> {
+					r.toggle("check_updates", () -> c.checkUpdates, v -> c.checkUpdates = v);
 					r.note(Text.translatable(P + ".data_note"));
 					r.button("forget_world", () -> confirm(Text.translatable(P + ".forget_world.confirm"), () -> {
 						String world = HoardEyeClient.worldKey(client);
