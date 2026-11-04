@@ -185,6 +185,15 @@ public final class ModsPanel extends Screen {
 		return hub.getClass();
 	}
 
+	/** A mod's full window (its "open" entry) coming back to {@code parent}; for the test. */
+	@SuppressWarnings("unchecked")
+	static Screen testOpenWindow(String id, Screen parent) {
+		for (Map<String, Object> mod : entries()) {
+			if (id.equals(mod.get("id")) && mod.get("open") instanceof Function<?, ?> f) return ((Function<Screen, Screen>) f).apply(parent);
+		}
+		return null;
+	}
+
 	/** A mod's full settings coming back to {@code parent}, as Mod Menu opens them. */
 	@SuppressWarnings("unchecked")
 	static Screen testSettings(String id, Screen parent) {
@@ -623,16 +632,37 @@ public final class ModsPanel extends Screen {
 		maxScroll = Math.max(0, ry + (int) scroll - listBottom + 6);
 		scrollbar(context, lx, lw, listTop, listBottom);
 
-		// Footer: the full settings.
+		// Footer: open the mod's full window (when it offers one), and its full settings.
 		context.fill(lx, listBottom, lx + lw, listBottom + 1, EDGE);
-		String all = "All " + mod.get("name") + " settings  ›", saved = "Saved as you click";
+		String all = "All " + mod.get("name") + " settings  ›";
 		if (textRenderer.getWidth(all) + 16 > lw - 16) all = "All settings  ›";
 		int bw = textRenderer.getWidth(all) + 16, bx = lx + lw - bw - 8, by = listBottom + 6;
 		boolean overAll = mouseX >= bx && mouseX < bx + bw && mouseY >= by && mouseY < by + 18;
 		context.fill(bx, by, bx + bw, by + 18, overAll ? 0xFFFFB84D : ACCENT);
 		context.drawText(textRenderer, all, bx + 8, by + 5, 0xFF0F1111, false);
 		hits.add(new Hit(bx, by, bx + bw, by + 18, () -> openSettings(mod)));
-		if (lx + 10 + textRenderer.getWidth(saved) + 8 <= bx) context.drawText(textRenderer, saved, lx + 10, by + 5, DIM, false);
+		// "Open <mod>": the full window, usable offline (read and manage without joining a server).
+		if (mod.get("open") instanceof Function<?, ?>) {
+			String open = "Open " + mod.get("name");
+			if (textRenderer.getWidth(open) + 16 > bx - lx - 16) open = "Open";
+			int ow = textRenderer.getWidth(open) + 16, ox = lx + 8;
+			boolean overOpen = mouseX >= ox && mouseX < ox + ow && mouseY >= by && mouseY < by + 18;
+			context.fill(ox, by, ox + ow, by + 18, overOpen ? BUTTON_HOVER : BUTTON);
+			context.drawText(textRenderer, open, ox + 8, by + 5, TEXT, false);
+			hits.add(new Hit(ox, by, ox + ow, by + 18, () -> openWindow(mod)));
+		} else {
+			String saved = "Saved as you click";
+			if (lx + 10 + textRenderer.getWidth(saved) + 8 <= bx) context.drawText(textRenderer, saved, lx + 10, by + 5, DIM, false);
+		}
+	}
+
+	/** Opens a mod's full window (its "open" entry), usable offline; the panel is the screen to come back to. */
+	@SuppressWarnings("unchecked")
+	private void openWindow(Map<String, Object> mod) {
+		if (!(mod.get("open") instanceof Function<?, ?> f)) return;
+		click();
+		Screen screen = ((Function<Screen, Screen>) f).apply(this);
+		if (screen != null) client.setScreen(screen);
 	}
 
 	/** Wrapped grey text; returns the y below it. */
