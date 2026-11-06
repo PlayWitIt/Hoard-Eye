@@ -210,6 +210,37 @@ public final class SelfTestGrab {
 		mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, new BlockHitResult(hit, Direction.UP, pos, false));
 	}
 
+	/** The way a person clicks it: on whichever face is really in view. */
+	private static void openBlockInView(BlockPos pos) {
+		Vec3d eye = mc.player.getEyePos();
+		BlockHitResult ray = mc.world.raycast(new net.minecraft.world.RaycastContext(eye, eye.add(Vec3d.ofCenter(pos).subtract(eye).multiply(1.2)),
+				net.minecraft.world.RaycastContext.ShapeType.OUTLINE, net.minecraft.world.RaycastContext.FluidHandling.NONE, mc.player));
+		mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, ray);
+	}
+
+	/** A box at slot 3 of an ender chest; clicks it open, takes everything, and it has to end up back in that slot. */
+	private static void enderRun(String name, BlockPos[] ender, Runnable beforePicker) {
+		pause(10);
+		then(name + " open", () -> openBlockInView(ender[0]));
+		waitFor(name + " screen", 100, () -> mc.currentScreen instanceof GenericContainerScreen && mc.player.currentScreenHandler.getRevision() != 0);
+		pause(3);
+		if (beforePicker != null) then(name + " before", beforePicker);
+		openPickerOn(3);
+		then(name + " all", () -> {
+			int[] at = BoxPicker.testButton("ALL");
+			mouseTo(at[0], at[1]);
+			clickButton(GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		});
+		pause(2);
+		pressEnterAndWait();
+		then(name + " results", () -> {
+			check(name + ": success: " + BoxGrab.lastMessage, BoxGrab.lastOk);
+			ItemStack box = mc.player.currentScreenHandler.slots.get(3).getStack();
+			check(name + ": the box is back in the ender chest", box.isOf(Items.RED_SHULKER_BOX));
+			check(name + ": clicked from within a player's reach (" + BoxGrab.lastReopenDistance + ")", BoxGrab.lastReopenDistance <= 4.5);
+		});
+	}
+
 	private static void openChest() {
 		then("open chest", () -> openBlock(chest));
 		waitFor("chest screen", 100, () -> mc.currentScreen instanceof GenericContainerScreen && mc.player.currentScreenHandler.getRevision() != 0);
@@ -1501,6 +1532,47 @@ public final class SelfTestGrab {
 				int room = 198;
 				check("picker text '" + key + "' fits (" + width + " of " + room + ")", width <= room);
 			}
+		});
+
+		// AH: the ender chest above your head. Clicked on the face you can see, not on a lid out of view.
+		reset();
+		BlockPos[] high = new BlockPos[1];
+		then("AH set", () -> {
+			high[0] = origin.add(0, 3, 2);
+			cmd("setblock " + high[0].getX() + " " + high[0].getY() + " " + high[0].getZ() + " ender_chest");
+			cmd("item replace entity @s enderchest.3 with " + KIT);
+		});
+		enderRun("AH", high, null);
+		then("AH2", () -> {
+			Vec3d aim = BoxGrab.lastReopenAim.getPos();
+			check("AH: never aims above the lid (" + aim + ")", aim.y <= high[0].getY() + 0.875 + 0.001);
+			check("AH: the face clicked is one in view (" + BoxGrab.lastReopenAim.getSide() + ")", BoxGrab.lastReopenAim.getSide() != Direction.UP);
+		});
+
+		// AI: at the edge of reach, and the only place for the box is away from the ender chest. It has to walk back.
+		reset();
+		BlockPos[] far = new BlockPos[1];
+		then("AI set", () -> {
+			far[0] = origin.add(-4, 0, 0);
+			cmd("setblock " + far[0].getX() + " " + far[0].getY() + " " + far[0].getZ() + " ender_chest");
+			cmd("item replace entity @s enderchest.3 with " + KIT);
+			int x = origin.getX(), y = origin.getY(), z = origin.getZ();
+			cmd("fill " + (x - 2) + " " + y + " " + (z - 2) + " " + (x + 1) + " " + y + " " + (z + 2) + " white_carpet");
+		});
+		enderRun("AI", far, null);
+		then("AI2", () -> check("AI: the box had to go away from the chest (" + String.valueOf(BoxGrab.spot()) + ")", BoxGrab.spot() != null && BoxGrab.spot().getX() == origin.getX() + 2));
+
+		// AJ: a server that hides chests: this client sees only air where it's standing.
+		reset();
+		BlockPos[] hidden = new BlockPos[1];
+		then("AJ set", () -> {
+			hidden[0] = origin.add(0, 0, 2);
+			cmd("setblock " + hidden[0].getX() + " " + hidden[0].getY() + " " + hidden[0].getZ() + " ender_chest");
+			cmd("item replace entity @s enderchest.3 with " + KIT);
+		});
+		enderRun("AJ", hidden, () -> {
+			mc.world.setBlockState(hidden[0], net.minecraft.block.Blocks.AIR.getDefaultState(), 0);
+			check("AJ: still known as the container", hidden[0].equals(BoxGrab.openContainer(mc)));
 		});
 
 		// AF: a screen no block opened isn't the chest you used last. The box must not go into that chest afterwards.

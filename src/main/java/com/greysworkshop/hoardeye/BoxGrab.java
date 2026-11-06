@@ -96,7 +96,7 @@ public final class BoxGrab {
 	/** The fastest a very good player does one inventory action or block click: about 150 ms. An estimate, not a measurement. */
 	private static final double HUMAN_ACTION_TICKS = 3;
 	private static final int MAX_TAKE_TRIES = 4;
-	private static final int OPEN_RETRY = 100, OPEN_TIMEOUT = 200, COLLECT_TIMEOUT = 200, REOPEN_TIMEOUT = 200;
+	private static final int OPEN_RETRY = 100, OPEN_TIMEOUT = 200, COLLECT_TIMEOUT = 200, REOPEN_TIMEOUT = 400;
 
 	private static Step step = Step.IDLE;
 	private static Request request;
@@ -152,10 +152,16 @@ public final class BoxGrab {
 	/** Self-test: pretend this many placements were refused. */
 	static int testFailPlaces;
 	/** The block last right-clicked, until a screen opens or it's too long ago for one to be its answer. */
-	private static BlockPos lastUsed;
+	private static BlockHitResult lastUsed;
 	private static long lastUsedAt;
 	/** The block the screen that's open came from. Null for a screen no block opened: an entity's, or a server's menu. */
-	private static BlockPos openedFrom;
+	private static BlockHitResult openedFrom;
+	/** Where you stood when this began, within reach of the container: where to go back to. */
+	private static Vec3d standAt;
+	private static int reopenTries, reopenClickTick;
+	/** How the container was last clicked to reopen it, for the self-test. */
+	static double lastReopenDistance;
+	static BlockHitResult lastReopenAim;
 	private static final long USE_ANSWER_MS = 10_000;
 
 	private BoxGrab() {}
@@ -216,9 +222,9 @@ public final class BoxGrab {
 		return burstWorks;
 	}
 
-	public static void noteUse(BlockPos pos) {
+	public static void noteUse(BlockHitResult hit) {
 		if (running()) return;
-		lastUsed = pos;
+		lastUsed = hit;
 		lastUsedAt = System.currentTimeMillis();
 	}
 
@@ -226,9 +232,9 @@ public final class BoxGrab {
 	static BlockPos openContainer(MinecraftClient client) {
 		ClientPlayerEntity p = client.player;
 		if (openedFrom == null || p == null || client.world == null || p.currentScreenHandler == p.playerScreenHandler) return null;
-		BlockState state = client.world.getBlockState(openedFrom);
-		boolean container = state.isOf(Blocks.ENDER_CHEST) || state.createScreenHandlerFactory(client.world, openedFrom) != null;
-		return container && !(state.getBlock() instanceof ShulkerBoxBlock) ? openedFrom : null;
+		// That it answered with this screen is the proof. What the block looks like here isn't: a server may hide chests.
+		BlockPos pos = openedFrom.getBlockPos();
+		return client.world.getBlockState(pos).getBlock() instanceof ShulkerBoxBlock ? null : pos;
 	}
 
 	public static boolean isBox(ItemStack stack) {
@@ -355,7 +361,8 @@ public final class BoxGrab {
 	static BlockPos placedBoxOpen(MinecraftClient client) {
 		ClientPlayerEntity p = client.player;
 		if (running() || p == null || client.world == null || openedFrom == null || !(p.currentScreenHandler instanceof ShulkerBoxScreenHandler)) return null;
-		return client.world.getBlockState(openedFrom).getBlock() instanceof ShulkerBoxBlock ? openedFrom : null;
+		BlockPos pos = openedFrom.getBlockPos();
+		return client.world.getBlockState(pos).getBlock() instanceof ShulkerBoxBlock ? pos : null;
 	}
 
 	/**
@@ -633,6 +640,8 @@ public final class BoxGrab {
 		savedYaw = p.getYaw();
 		savedPitch = p.getPitch();
 		savedSelected = inv.getSelectedSlot();
+		standAt = p.getEntityPos();
+		reopenTries = 0;
 		boxItem = r.box().getItem();
 		boxName = r.box().get(DataComponentTypes.CUSTOM_NAME);
 		swaps.clear();
@@ -1472,14 +1481,18 @@ public final class BoxGrab {
 		}
 		ScreenHandler h = p.currentScreenHandler;
 		if (h != p.playerScreenHandler && !(h instanceof ShulkerBoxScreenHandler)) {
+			walk(client, false);
 			if (h.getRevision() != 0 && ready()) {
 				go(Step.PUT_BACK);
 				putBack(client, p);
 			}
 			return;
 		}
-		Vec3d hit = Vec3d.ofCenter(container).add(0, 0.45, 0);
-		if (p.getEyePos().distanceTo(hit) > REACH + 1 || ticks > REOPEN_TIMEOUT) {
+		double distance = p.getEyePos().distanceTo(Vec3d.ofCenter(container));
+		Vec3d back = standAt.subtract(p.getEntityPos());
+		boolean canStepBack = Math.hypot(back.x, back.z) > 0.4;
+		if (ticks > REOPEN_TIMEOUT || (distance > REACH + 1 && !canStepBack)) {
+			walk(client, false);
 			notes.add(Text.translatable("hoardeye.grab.not_reopened").getString());
 			request = new Request(request.sourceSlot(), request.sourceIsInventory(), request.inventoryIndex(), request.box(), request.contents(),
 					request.want(), null, request.containerSlots(), false, request.deposits(), request.tidy(), request.loose(), request.bundlePicks());
@@ -1487,20 +1500,61 @@ public final class BoxGrab {
 			putBack(client, p);
 			return;
 		}
+		// Getting the box may have taken you out of reach of a chest you were already at the edge of.
+		if (distance > REACH && canStepBack) {
+			p.setYaw((float) (MathHelper.atan2(back.z, back.x) * 180 / Math.PI) - 90);
+			walk(client, true);
+			client.options.jumpKey.setPressed(p.horizontalCollision && p.isOnGround());
+			return;
+		}
+		walk(client, false);
 		if (p.isSneaking()) return;
-		// Exactly once, then only a slow retry: a second click while the first is on its way opens the chest again,
-		// and the server would throw away everything sent to the first one.
-		if ((!clicked && ready()) || (clicked && ticks % OPEN_RETRY == 0)) {
+		// Once, then a retry when an answer is overdue: a second click while the first is on its way opens the chest again,
+		// and the server would throw away everything sent to the first one. Each retry clicks somewhere else on it.
+		if ((!clicked && ready()) || (clicked && ticks - reopenClickTick >= 30 + 2 * latencyTicks(client, p))) {
 			clicked = true;
+			reopenClickTick = ticks;
 			acted();
-			look(p, hit);
-			client.interactionManager.interactBlock(p, Hand.MAIN_HAND, new BlockHitResult(hit, Direction.UP, container, false));
+			BlockHitResult aim = aimAt(p, world, container, reopenTries++);
+			lastReopenAim = aim;
+			lastReopenDistance = p.getEyePos().distanceTo(aim.getPos());
+			look(p, aim.getPos());
+			client.interactionManager.interactBlock(p, Hand.MAIN_HAND, aim);
 			p.swingHand(Hand.MAIN_HAND);
 			if (burstRun && !walking) {
 				p.setYaw(savedYaw);
 				p.setPitch(savedPitch);
 			}
 		}
+	}
+
+	/**
+	 * Somewhere on the block a person could really click from here: first where you clicked it yourself, then whichever
+	 * parts of it are in view. An ender chest is lower and narrower than a full block, and might be above your head.
+	 */
+	private static BlockHitResult aimAt(ClientPlayerEntity p, ClientWorld world, BlockPos pos, int attempt) {
+		Vec3d eye = p.getEyePos();
+		BlockHitResult own = openedFrom != null && openedFrom.getBlockPos().equals(pos) ? openedFrom : null;
+		List<BlockHitResult> found = new ArrayList<>();
+		if (own != null && eye.distanceTo(own.getPos()) <= REACH) found.add(own);
+		var shape = world.getBlockState(pos).getOutlineShape(world, pos);
+		if (!shape.isEmpty()) {
+			Box box = shape.getBoundingBox().offset(pos);
+			Vec3d c = box.getCenter();
+			double dx = box.getLengthX() * 0.4, dy = box.getLengthY() * 0.4, dz = box.getLengthZ() * 0.4;
+			Vec3d[] points = {c, c.add(0, dy, 0), c.add(0, -dy, 0), c.add(dx, 0, 0), c.add(-dx, 0, 0), c.add(0, 0, dz), c.add(0, 0, -dz)};
+			for (Vec3d point : points) {
+				// A little past it, so the ray reaches the block's surface.
+				Vec3d end = eye.add(point.subtract(eye).multiply(1.2));
+				BlockHitResult ray = world.raycast(new RaycastContext(eye, end, RaycastContext.ShapeType.OUTLINE, RaycastContext.FluidHandling.NONE, p));
+				if (ray.getType() == HitResult.Type.BLOCK && ray.getBlockPos().equals(pos) && eye.distanceTo(ray.getPos()) <= REACH) found.add(ray);
+			}
+		}
+		if (!found.isEmpty()) return found.get(attempt % found.size());
+		// Nothing in view that we know of. It did open for you, so try anyway.
+		if (own != null) return own;
+		double top = shape.isEmpty() ? 0.95 : shape.getMax(Direction.Axis.Y);
+		return new BlockHitResult(new Vec3d(pos.getX() + 0.5, pos.getY() + top, pos.getZ() + 0.5), Direction.UP, pos, false);
 	}
 
 	private static void putBack(MinecraftClient client, ClientPlayerEntity p) {

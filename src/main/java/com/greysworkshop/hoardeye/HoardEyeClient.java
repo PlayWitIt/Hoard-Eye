@@ -130,7 +130,7 @@ public class HoardEyeClient implements ClientModInitializer {
 		boxKey = pickBoxKey;
 
 		UseBlockCallback.EVENT.register((player, world, hand, hit) -> {
-			if (world.isClient()) BoxGrab.noteUse(hit.getBlockPos());
+			if (world.isClient()) BoxGrab.noteUse(hit);
 			if (!world.isClient() || !ModConfig.INSTANCE.enabled || !ModConfig.INSTANCE.rememberContainers) return ActionResult.PASS;
 			ClientWorld clientWorld = (ClientWorld) world;
 
