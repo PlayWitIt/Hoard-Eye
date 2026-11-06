@@ -903,7 +903,8 @@ public final class SelfTestGrab {
 		}
 		then("O2", () -> {
 			ModConfig.INSTANCE.boxPickerSpeed = 200;
-			check("O: slower setting takes longer (" + timed[0] + " > " + timed[1] + " > " + timed[2] + ")", timed[0] > timed[1] && timed[1] > timed[2]);
+			// Only the far ends: picking up the drop varies by a few ticks, more than 2x and 5x differ by here.
+			check("O: the slowest setting takes clearly longer (" + timed[0] + " vs " + timed[1] + ", " + timed[2] + ")", timed[0] > timed[1] + 15 && timed[0] > timed[2] + 15);
 		});
 
 		// P: the clicks get lost on the way (a server not keeping up): the box isn't broken until the items are really out.
@@ -1501,6 +1502,48 @@ public final class SelfTestGrab {
 				check("picker text '" + key + "' fits (" + width + " of " + room + ")", width <= room);
 			}
 		});
+
+		// AF: a screen no block opened isn't the chest you used last. The box must not go into that chest afterwards.
+		reset();
+		openChest();
+		then("AF chest", () -> {
+			check("AF: a chest is found as the container", chest.equals(BoxGrab.openContainer(mc)));
+			mc.player.closeHandledScreen();
+		});
+		pause(5);
+		then("AF cart", () -> cmd("summon chest_minecart " + origin.getX() + " " + origin.getY() + " " + (origin.getZ() - 2)));
+		waitFor("the minecart", 100, () -> !mc.world.getEntitiesByClass(net.minecraft.entity.vehicle.ChestMinecartEntity.class, new Box(origin).expand(6), e -> true).isEmpty());
+		pause(5);
+		then("AF open", () -> mc.interactionManager.interactEntity(mc.player,
+				mc.world.getEntitiesByClass(net.minecraft.entity.vehicle.ChestMinecartEntity.class, new Box(origin).expand(6), e -> true).get(0), Hand.MAIN_HAND));
+		waitFor("the minecart's screen", 100, () -> mc.currentScreen instanceof GenericContainerScreen);
+		then("AF2", () -> {
+			check("AF: a minecart's screen has no container block", BoxGrab.openContainer(mc) == null);
+			mc.player.closeHandledScreen();
+			cmd("kill @e[type=chest_minecart]");
+			cmd("kill @e[type=item]");
+		});
+		pause(5);
+
+		// AG: asking the server for the truth must never throw away what it thinks is on the cursor.
+		if (!remote) {
+			reset();
+			openChest();
+			then("AG cursor", () -> {
+				var uuid = mc.player.getUuid();
+				mc.getServer().execute(() -> mc.getServer().getPlayerManager().getPlayer(uuid).currentScreenHandler.setCursorStack(new ItemStack(Items.DIAMOND, 5)));
+			});
+			pause(5);
+			then("AG ask", () -> BoxGrab.resync(mc.player));
+			pause(10);
+			then("AG2", () -> {
+				check("AG: the server's cursor reaches the client (" + mc.player.currentScreenHandler.getCursorStack() + ")", mc.player.currentScreenHandler.getCursorStack().isOf(Items.DIAMOND));
+				check("AG: nothing was dropped", mc.world.getEntitiesByClass(ItemEntity.class, new Box(origin).expand(10), e -> e.getStack().isOf(Items.DIAMOND)).isEmpty());
+				mc.player.closeHandledScreen();
+			});
+			pause(5);
+			then("AG3", () -> check("AG: and it's back in the inventory on closing (" + mc.player.getInventory().count(Items.DIAMOND) + ")", mc.player.getInventory().count(Items.DIAMOND) == 5));
+		}
 
 		// M: switched off in settings.
 		reset();

@@ -151,8 +151,12 @@ public final class BoxGrab {
 	static boolean lastBurst;
 	/** Self-test: pretend this many placements were refused. */
 	static int testFailPlaces;
-	/** The block last right-clicked, so the container can be found again. */
+	/** The block last right-clicked, until a screen opens or it's too long ago for one to be its answer. */
 	private static BlockPos lastUsed;
+	private static long lastUsedAt;
+	/** The block the screen that's open came from. Null for a screen no block opened: an entity's, or a server's menu. */
+	private static BlockPos openedFrom;
+	private static final long USE_ANSWER_MS = 10_000;
 
 	private BoxGrab() {}
 
@@ -179,6 +183,11 @@ public final class BoxGrab {
 	 */
 	public static boolean onOpenScreen(int syncId, ScreenHandlerType<?> type) {
 		lastSync = syncId;
+		// The bot's own screens don't count: it's reopening the container this all began from.
+		if (!running()) {
+			openedFrom = lastUsed != null && System.currentTimeMillis() - lastUsedAt <= USE_ANSWER_MS ? lastUsed : null;
+			lastUsed = null;
+		}
 		if (!swallowOpen || type != ScreenHandlerType.SHULKER_BOX) return false;
 		swallowOpen = false;
 		// Some server numbers its screens differently, so the clicks went nowhere.
@@ -208,16 +217,18 @@ public final class BoxGrab {
 	}
 
 	public static void noteUse(BlockPos pos) {
-		if (!running()) lastUsed = pos;
+		if (running()) return;
+		lastUsed = pos;
+		lastUsedAt = System.currentTimeMillis();
 	}
 
 	/** The container that's open, if it's a block we could reopen; null for an entity or a server's menu. */
 	static BlockPos openContainer(MinecraftClient client) {
 		ClientPlayerEntity p = client.player;
-		if (lastUsed == null || p == null || client.world == null || p.currentScreenHandler == p.playerScreenHandler) return null;
-		BlockState state = client.world.getBlockState(lastUsed);
-		boolean container = state.isOf(Blocks.ENDER_CHEST) || state.createScreenHandlerFactory(client.world, lastUsed) != null;
-		return container && !(state.getBlock() instanceof ShulkerBoxBlock) ? lastUsed : null;
+		if (openedFrom == null || p == null || client.world == null || p.currentScreenHandler == p.playerScreenHandler) return null;
+		BlockState state = client.world.getBlockState(openedFrom);
+		boolean container = state.isOf(Blocks.ENDER_CHEST) || state.createScreenHandlerFactory(client.world, openedFrom) != null;
+		return container && !(state.getBlock() instanceof ShulkerBoxBlock) ? openedFrom : null;
 	}
 
 	public static boolean isBox(ItemStack stack) {
@@ -343,8 +354,8 @@ public final class BoxGrab {
 	/** The placed box whose screen is open, if you opened it yourself. */
 	static BlockPos placedBoxOpen(MinecraftClient client) {
 		ClientPlayerEntity p = client.player;
-		if (running() || p == null || client.world == null || lastUsed == null || !(p.currentScreenHandler instanceof ShulkerBoxScreenHandler)) return null;
-		return client.world.getBlockState(lastUsed).getBlock() instanceof ShulkerBoxBlock ? lastUsed : null;
+		if (running() || p == null || client.world == null || openedFrom == null || !(p.currentScreenHandler instanceof ShulkerBoxScreenHandler)) return null;
+		return client.world.getBlockState(openedFrom).getBlock() instanceof ShulkerBoxBlock ? openedFrom : null;
 	}
 
 	/**
@@ -723,10 +734,13 @@ public final class BoxGrab {
 		return true;
 	}
 
-	/** A click on nothing with an out-of-date number makes the server send the whole inventory, correcting any guess. */
-	private static void resync(ClientPlayerEntity p) {
+	/**
+	 * A click on nothing with an out-of-date number makes the server send the whole inventory, correcting any guess.
+	 * Slot -1, the gap between slots: -999 is outside the window, which would throw whatever the server thinks is on the cursor.
+	 */
+	static void resync(ClientPlayerEntity p) {
 		ScreenHandler h = p.currentScreenHandler;
-		p.networkHandler.sendPacket(new ClickSlotC2SPacket(h.syncId, -1, (short) -999, (byte) 0, SlotActionType.PICKUP,
+		p.networkHandler.sendPacket(new ClickSlotC2SPacket(h.syncId, -1, (short) -1, (byte) 0, SlotActionType.PICKUP,
 				new Int2ObjectOpenHashMap<>(), ItemStackHash.EMPTY));
 	}
 
@@ -757,6 +771,7 @@ public final class BoxGrab {
 		swallowOpen = false;
 		burstWorks = true;
 		lastSync = 0;
+		lastUsed = openedFrom = null;
 		step = Step.IDLE;
 	}
 
@@ -1528,7 +1543,7 @@ public final class BoxGrab {
 		hadBox = box >= 0;
 		settleTicks = 8 + 2 * latencyTicks(client, p);
 		boxBackTick = totalTicks;
-				breaking = false;
+		breaking = false;
 		walk(client, false);
 		p.setYaw(savedYaw);
 		p.setPitch(savedPitch);

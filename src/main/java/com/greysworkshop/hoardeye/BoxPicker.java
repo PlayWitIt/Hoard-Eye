@@ -170,6 +170,16 @@ public final class BoxPicker {
 		return false;
 	}
 
+	/** Where the mouse is now. The screen's own idea is from the last frame drawn, so on a slow frame it can be out of date. */
+	private static Slot slotUnderMouse(MinecraftClient client, HandledScreen<?> on) {
+		HandledScreenAccessor a = (HandledScreenAccessor) on;
+		double x = client.mouse.getScaledX(client.getWindow()) - a.hoardeye$getX(), y = client.mouse.getScaledY(client.getWindow()) - a.hoardeye$getY();
+		for (Slot s : on.getScreenHandler().slots) {
+			if (s.isEnabled() && x >= s.x - 1 && x < s.x + 17 && y >= s.y - 1 && y < s.y + 17) return s;
+		}
+		return null;
+	}
+
 	private static boolean usable(Slot s, ClientPlayerEntity p) {
 		// The armor, crafting and offhand slots can't be swapped back the same way.
 		return s.inventory != p.getInventory() || s.getIndex() < PlayerInventory.MAIN_SIZE;
@@ -181,7 +191,7 @@ public final class BoxPicker {
 		ClientPlayerEntity p = client.player;
 		if (!ModConfig.INSTANCE.enabled || !ModConfig.INSTANCE.boxPicker || p == null || BoxGrab.running()) return false;
 		if (!p.currentScreenHandler.getCursorStack().isEmpty()) return false;
-		Slot hover = ((HandledScreenAccessor) on).hoardeye$getFocusedSlot();
+		Slot hover = slotUnderMouse(client, on);
 		boolean onBox = hover != null && BoxGrab.isBox(hover.getStack()) && usable(hover, p);
 		if (!onBox && (!anyBox || !hasBoxes(on))) return false;
 
