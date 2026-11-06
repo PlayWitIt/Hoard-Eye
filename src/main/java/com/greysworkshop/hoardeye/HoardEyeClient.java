@@ -8,7 +8,10 @@ import net.fabricmc.fabric.api.client.rendering.v1.TooltipComponentCallback;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
+import net.fabricmc.fabric.api.client.item.v1.ItemTooltipCallback;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
+import net.fabricmc.fabric.api.client.screen.v1.ScreenKeyboardEvents;
+import net.fabricmc.fabric.api.client.screen.v1.ScreenMouseEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.block.Block;
@@ -18,6 +21,7 @@ import net.minecraft.block.DoubleBlockProperties;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.ingame.CreativeInventoryScreen;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.client.gui.screen.ingame.InventoryScreen;
@@ -78,6 +82,7 @@ public class HoardEyeClient implements ClientModInitializer {
 	private KeyBinding toggleKey;
 	private KeyBinding configKey;
 	private KeyBinding searchKey;
+	private KeyBinding pickBoxKey;
 
 	private Target pendingOpen;
 	/** How many slots the clicked container's screen has (-1: unknown, a modded one). */
@@ -111,8 +116,11 @@ public class HoardEyeClient implements ClientModInitializer {
 				"key.hoardeye.config", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, category));
 		searchKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
 				"key.hoardeye.search", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_Y, category));
+		pickBoxKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+				"key.hoardeye.pick_box", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_G, category));
 
 		UseBlockCallback.EVENT.register((player, world, hand, hit) -> {
+			if (world.isClient()) BoxGrab.noteUse(hit.getBlockPos());
 			if (!world.isClient() || !ModConfig.INSTANCE.enabled || !ModConfig.INSTANCE.rememberContainers) return ActionResult.PASS;
 			ClientWorld clientWorld = (ClientWorld) world;
 
@@ -141,6 +149,7 @@ public class HoardEyeClient implements ClientModInitializer {
 			return ActionResult.PASS;
 		});
 
+		ScreenEvents.AFTER_INIT.register((client, screen, width, height) -> installBoxPicker(client, screen));
 		ScreenEvents.AFTER_INIT.register((client, screen, width, height) -> {
 			if (!(screen instanceof HandledScreen<?> handled) || pendingOpen == null) return;
 			if (screen instanceof InventoryScreen || screen instanceof CreativeInventoryScreen) return;
@@ -175,11 +184,23 @@ public class HoardEyeClient implements ClientModInitializer {
 		});
 
 		ClientTickEvents.END_CLIENT_TICK.register(this::tick);
+		ClientTickEvents.END_CLIENT_TICK.register(BoxGrab::tick);
+		ItemTooltipCallback.EVENT.register((stack, context, type, lines) -> {
+			MinecraftClient client = MinecraftClient.getInstance();
+			if (!ModConfig.INSTANCE.enabled || !ModConfig.INSTANCE.boxPicker || !BoxGrab.isBox(stack)) return;
+			if (!(client.currentScreen instanceof HandledScreen<?>) || client.currentScreen instanceof CreativeInventoryScreen) return;
+			ContainerComponent contents = stack.get(DataComponentTypes.CONTAINER);
+			if (contents == null || contents.streamNonEmpty().findAny().isEmpty()) return;
+			lines.add(Text.translatable("hoardeye.picker.tooltip", pickBoxKey.getBoundKeyLocalizedText()).formatted(Formatting.AQUA));
+		});
+		HudElementRegistry.attachElementAfter(VanillaHudElements.CHAT, Identifier.of(MOD_ID, "box_grab"), BoxGrab::renderHud);
 
 		// Disconnect fires on the network thread; do the work on the game thread.
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> client.execute(() -> {
 			pendingOpen = null;
 			pendingPlace = null;
+			BoxPicker.close();
+			BoxGrab.onDisconnect();
 			Sight.clear();
 			store.saveIfDirty();
 		}));
@@ -194,6 +215,13 @@ public class HoardEyeClient implements ClientModInitializer {
 		WorldRenderEvents.BEFORE_DEBUG_RENDER.register(Locator::renderWorld);
 
 		// Scripted development test (./gradlew runSelfTest); the class isn't shipped in the release jar.
+		if (Boolean.getBoolean("hoardeye.grabtest")) {
+			try {
+				Class.forName("com.greysworkshop.hoardeye.SelfTestGrab").getMethod("start").invoke(null);
+			} catch (ReflectiveOperationException e) {
+				LOGGER.error("Grab test not available", e);
+			}
+		}
 		if (Boolean.getBoolean("hoardeye.selftest")) {
 			try {
 				Class.forName("com.greysworkshop.hoardeye.SelfTest").getMethod("start").invoke(null);
@@ -205,6 +233,42 @@ public class HoardEyeClient implements ClientModInitializer {
 
 	public NameStore store() {
 		return store;
+	}
+
+	/** The box picker sits on top of whatever container is open, and takes all input while it's up. */
+	private void installBoxPicker(MinecraftClient client, Screen screen) {
+		if (!(screen instanceof HandledScreen<?> handled) || screen instanceof CreativeInventoryScreen) return;
+		ScreenEvents.afterRender(screen).register((s, context, mouseX, mouseY, delta) -> BoxPicker.render(handled, context, mouseX, mouseY));
+		ScreenEvents.remove(screen).register(closed -> {
+			if (BoxPicker.isOpenOn(closed)) BoxPicker.close();
+		});
+		ScreenMouseEvents.allowMouseClick(screen).register((s, click) -> {
+			if (BoxPicker.isOpenOn(s)) {
+				BoxPicker.mouseDown(click);
+				return false;
+			}
+			// Ahead of the screen itself, so middle-click always means this over a box.
+			if (click.button() == GLFW.GLFW_MOUSE_BUTTON_MIDDLE || pickBoxKey.matchesMouse(click)) return !BoxPicker.tryOpen(handled);
+			return true;
+		});
+		ScreenMouseEvents.allowMouseRelease(screen).register((s, click) -> {
+			if (!BoxPicker.isOpenOn(s)) return true;
+			BoxPicker.mouseUp();
+			return false;
+		});
+		ScreenMouseEvents.allowMouseDrag(screen).register((s, click, dx, dy) -> !BoxPicker.isOpenOn(s));
+		ScreenMouseEvents.allowMouseScroll(screen).register((s, x, y, horizontal, vertical) -> {
+			if (!BoxPicker.isOpenOn(s)) return true;
+			BoxPicker.scroll(x, y, vertical, client.isShiftPressed());
+			return false;
+		});
+		ScreenKeyboardEvents.allowKeyPress(screen).register((s, key) -> {
+			if (BoxPicker.isOpenOn(s)) {
+				BoxPicker.key(key, pickBoxKey, client.options.inventoryKey);
+				return false;
+			}
+			return !pickBoxKey.matchesKey(key) || !BoxPicker.tryOpen(handled);
+		});
 	}
 
 	/** Versions before 1.3.0 were called "Shulker Names", and before 3.0.0 "Container Peek"; carry their saved files over. */
@@ -600,6 +664,8 @@ public class HoardEyeClient implements ClientModInitializer {
 				ModsPanel.section("Shulker boxes"),
 				ModsPanel.toggle(Text.translatable(P + ".shulker_tooltip"), Text.translatable(P + ".shulker_tooltip.desc"), () -> c.shulkerTooltip, v -> c.shulkerTooltip = v),
 				ModsPanel.toggle(Text.translatable(P + ".shulker_shift"), Text.translatable(P + ".shulker_shift.desc"), () -> c.shulkerTooltipShiftOnly, v -> c.shulkerTooltipShiftOnly = v),
+				ModsPanel.toggle(Text.translatable(P + ".box_picker"), Text.translatable(P + ".box_picker.desc"), () -> c.boxPicker, v -> c.boxPicker = v),
+				ModsPanel.toggle(Text.translatable(P + ".box_picker_instant"), Text.translatable(P + ".box_picker_instant.desc"), () -> c.boxPickerInstant, v -> c.boxPickerInstant = v),
 				ModsPanel.section("Finding"),
 				ModsPanel.toggle(Text.translatable(P + ".locator_markers"), Text.translatable(P + ".locator_markers.desc"), () -> c.locatorMarkers, v -> c.locatorMarkers = v),
 				ModsPanel.toggle(Text.translatable(P + ".locator_beam"), Text.translatable(P + ".locator_beam.desc"), () -> c.locatorBeam, v -> c.locatorBeam = v),

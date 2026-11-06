@@ -6,6 +6,9 @@
 		"ClientPlayNetworkHandlerMixin",
 		"ClientWorldMixin",
 		"HandledScreenAccessor",
+		"HandledScreenTooltipMixin",
+		"InteractionManagerAccessor",
+		"InteractionManagerMixin",
 		"ItemStackMixin"
 	],
 	"injectors": {

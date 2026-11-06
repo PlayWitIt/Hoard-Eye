@@ -75,6 +75,12 @@ public final class ModConfig {
 	public boolean showUnknownHint = true;
 	/** Replace the text list in shulker box item tooltips with a grid of icons. */
 	public boolean shulkerTooltip = true;
+	/** Middle-click a shulker box to pick what to take from it (BoxPicker). */
+	public boolean boxPicker = true;
+	/** How fast the box picker works, as a percentage of the fastest a person could do it by hand. */
+	public int boxPickerSpeed = 200;
+	/** Send place, open, take and break in one go instead of step by step. Ignores the speed. */
+	public boolean boxPickerInstant = false;
 
 	/** Per-type visibility; types missing from the map are shown. */
 	public Map<ContainerKind, Boolean> containers = new EnumMap<>(ContainerKind.class);

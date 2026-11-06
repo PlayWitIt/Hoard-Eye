@@ -51,5 +51,18 @@ loom {
 			vmArgs "-Dhoardeye.selftest=true", "-Xmx1536m"
 			runDir "run"
 		}
+		// The box picker in a real game: ./gradlew runGrabTest, or with -PgrabServer=host:port against a server.
+		grabTest {
+			client()
+			name = "Grab Test"
+			vmArgs "-Dhoardeye.grabtest=true", "-Xmx2g"
+			if (project.hasProperty('grabServer')) {
+				vmArgs "-Dhoardeye.grabtest.server=true"
+				programArgs "--quickPlayMultiplayer", project.property('grabServer'), "--username", "GrabTest"
+			} else {
+				programArgs "--username", "GrabTest"
+			}
+			runDir "run-grab"
+		}
 	}
 }
