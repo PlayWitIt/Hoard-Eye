@@ -605,6 +605,21 @@ public final class BoxGrab {
 		return left;
 	}
 
+	/** Your inventory as it would be with the plan done: for showing it before anything happens. */
+	static ItemStack[] inventoryAfter(PlayerInventory inv, List<Request> plan) {
+		ItemStack[] slots = copyOf(inv);
+		for (Request r : plan) simulateOne(slots, r);
+		return slots;
+	}
+
+	/** A box's slots with these taken out and those put in. */
+	static ItemStack[] boxAfter(List<ItemStack> contents, int[] want, List<ItemStack> deposits) {
+		ItemStack[] box = contents.stream().map(ItemStack::copy).toArray(ItemStack[]::new);
+		for (int i = 0; i < box.length; i++) box[i].decrement(want[i]);
+		for (ItemStack d : deposits) insert(box, d.copy());
+		return box;
+	}
+
 	/** How many empty slots you'd have with the plan done. */
 	static int freeAfter(PlayerInventory inv, List<Request> plan) {
 		ItemStack[] slots = copyOf(inv);

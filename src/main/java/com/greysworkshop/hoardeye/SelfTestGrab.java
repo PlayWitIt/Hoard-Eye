@@ -62,6 +62,7 @@ public final class SelfTestGrab {
 			+ "{slot:26,item:{id:\"firework_rocket\",count:64}}]]";
 
 	private static final Deque<Step> steps = new ArrayDeque<>();
+	private static final int[] dirtSlot = new int[2];
 	private static boolean started, stopping;
 	private static int waited, passed, failed, sleep;
 	private static BlockPos origin, chest;
@@ -239,6 +240,27 @@ public final class SelfTestGrab {
 			check(name + ": the box is back in the ender chest", box.isOf(Items.RED_SHULKER_BOX));
 			check(name + ": clicked from within a player's reach (" + BoxGrab.lastReopenDistance + ")", BoxGrab.lastReopenDistance <= 4.5);
 		});
+	}
+
+	/** Press here, move there a frame or two, let go: through the game's real mouse handler. */
+	private static void drag(java.util.function.Supplier<int[]> from, java.util.function.Supplier<int[]> to, int mouseButton) {
+		then("drag start", () -> {
+			int[] at = from.get();
+			mouseTo(at[0], at[1]);
+		});
+		pause(2);
+		then("drag press", () -> button(mouseButton, GLFW.GLFW_PRESS, 0));
+		pause(2);
+		then("drag move", () -> {
+			int[] at = to.get();
+			mouseTo(at[0], at[1]);
+		});
+		pause(3);
+	}
+
+	private static void drop(int mouseButton) {
+		then("drop", () -> button(mouseButton, GLFW.GLFW_RELEASE, 0));
+		pause(2);
 	}
 
 	private static void openChest() {
@@ -441,7 +463,11 @@ public final class SelfTestGrab {
 	private static void script() {
 		waitFor("in the world", 2400, () -> mc.player != null);
 		// The desktop's own pointer events would overwrite where the test puts the mouse, and spin the camera.
-		then("no desktop pointer", () -> GLFW.glfwSetCursorPosCallback(mc.getWindow().getHandle(), null));
+		then("no desktop pointer", () -> {
+			GLFW.glfwSetCursorPosCallback(mc.getWindow().getHandle(), null);
+			// Everything but AK presses Enter once to start.
+			ModConfig.INSTANCE.boxPickerConfirm = false;
+		});
 		then("server watch", () -> {
 			if (remote) return;
 			net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_WORLD_TICK.register(world -> {
@@ -790,9 +816,9 @@ public final class SelfTestGrab {
 			check("I: middle-click on nothing doesn't open it", !BoxPicker.isOpen());
 		});
 		openPickerOn(5);
-		clickCell(0, GLFW.GLFW_MOUSE_BUTTON_LEFT, GLFW.GLFW_MOD_SHIFT);
+		clickCell(0, GLFW.GLFW_MOUSE_BUTTON_LEFT, GLFW.GLFW_MOD_CONTROL);
 		pause(2);
-		then("I3", () -> check("I: shift-click picks every stack of that item", BoxPicker.testWant(0) == 1 && BoxPicker.testWant(3) == 1));
+		then("I3", () -> check("I: ctrl-click picks every stack of that item", BoxPicker.testWant(0) == 1 && BoxPicker.testWant(3) == 1));
 		then("drag", () -> {
 			int[] at = BoxPicker.testCell(9);
 			mouseTo(at[0], at[1]);
@@ -1527,7 +1553,7 @@ public final class SelfTestGrab {
 		// Every message the picker can show has to fit its panel.
 		then("texts", () -> {
 			for (String key : List.of("hint", "hint_box", "hint_inv", "hint_typing", "hint_bundle", "hint_bundle_cell", "safe", "no_pick", "no_spot", "no_room", "no_room_box", "cursor", "survival_only", "nobody", "amount_hint", "nothing_to_top_up",
-					"hint.tab", "hint.kit", "hint.last", "hint.all", "hint.none", "hint.tidy", "hint.instant", "hint.guard", "hint.topup", "hint.match", "hint.storeall", "hint.save", "hint.speed", "hint.take", "hint.cancel")) {
+					"hint.tab", "hint.kit", "hint.last", "hint.all", "hint.none", "hint.tidy", "hint.instant", "hint.guard", "hint.topup", "hint.match", "hint.storeall", "hint.save", "hint.speed", "hint.take", "hint.cancel", "hint_ghost", "confirm_keys")) {
 				int width = mc.textRenderer.getWidth(net.minecraft.text.Text.translatable("hoardeye.picker." + key));
 				int room = 198;
 				check("picker text '" + key + "' fits (" + width + " of " + room + ")", width <= room);
@@ -1574,6 +1600,135 @@ public final class SelfTestGrab {
 			mc.world.setBlockState(hidden[0], net.minecraft.block.Blocks.AIR.getDefaultState(), 0);
 			check("AJ: still known as the container", hidden[0].equals(BoxGrab.openContainer(mc)));
 		});
+
+		// AK: drag and drop, then confirm. Nothing reaches the server until the confirm.
+		reset();
+		boxInChest(5);
+		then("AK have", () -> cmd("give @s dirt 32"));
+		pause(10);
+		openChest();
+		openPickerOn(5);
+		// Box to inventory: pearls in slot 9.
+		drag(() -> BoxPicker.testCell(9), () -> BoxPicker.testInv(20), GLFW.GLFW_MOUSE_BUTTON_LEFT);
+		shot("18_dragging");
+		drop(GLFW.GLFW_MOUSE_BUTTON_LEFT);
+		then("AK1", () -> {
+			check("AK: dragging a stack to the inventory plans it (" + BoxPicker.testWant(9) + ")", BoxPicker.testWant(9) == 16);
+			boolean shown = false;
+			for (int i = 0; i < 36; i++) shown |= BoxPicker.testPreviewInv(i).isOf(Items.ENDER_PEARL);
+			check("AK: it shows where it will land", shown);
+			check("AK: nothing has really moved", count(Items.ENDER_PEARL) == 0);
+		});
+		// Right button: half. Golden apples in slot 10.
+		drag(() -> BoxPicker.testCell(10), () -> BoxPicker.testInv(20), GLFW.GLFW_MOUSE_BUTTON_RIGHT);
+		drop(GLFW.GLFW_MOUSE_BUTTON_RIGHT);
+		then("AK2", () -> check("AK: right-drag plans half (" + BoxPicker.testWant(10) + ")", BoxPicker.testWant(10) == 32));
+		// Dropped on nothing: as if it never happened. Rockets in slot 26.
+		drag(() -> BoxPicker.testCell(26), () -> new int[]{1, 1}, GLFW.GLFW_MOUSE_BUTTON_LEFT);
+		drop(GLFW.GLFW_MOUSE_BUTTON_LEFT);
+		then("AK3", () -> check("AK: dropped outside, it's cancelled (" + BoxPicker.testWant(26) + ")", BoxPicker.testWant(26) == 0));
+		// Dragged on a stack that was already planned, and dropped outside: left as it was.
+		drag(() -> BoxPicker.testCell(9), () -> new int[]{1, 1}, GLFW.GLFW_MOUSE_BUTTON_LEFT);
+		drop(GLFW.GLFW_MOUSE_BUTTON_LEFT);
+		then("AK4", () -> check("AK: a planned stack dropped outside stays planned (" + BoxPicker.testWant(9) + ")", BoxPicker.testWant(9) == 16));
+		// Inventory to box: the dirt, into an empty cell.
+		then("AK dirt", () -> {
+			int dirt = -1;
+			for (int i = 0; i < 36; i++) if (mc.player.getInventory().getStack(i).isOf(Items.DIRT)) dirt = i;
+			dirtSlot[0] = dirt;
+		});
+		drag(() -> BoxPicker.testInv(dirtSlot[0]), () -> BoxPicker.testCell(1), GLFW.GLFW_MOUSE_BUTTON_LEFT);
+		drop(GLFW.GLFW_MOUSE_BUTTON_LEFT);
+		then("AK5", () -> {
+			check("AK: dragging into the box plans putting it in (" + BoxPicker.testStore(dirtSlot[0]) + ")", BoxPicker.testStore(dirtSlot[0]) == 32);
+			boolean shown = false;
+			for (int i = 0; i < 27; i++) shown |= BoxPicker.testPreviewBox(i).isOf(Items.DIRT);
+			check("AK: and it shows in the box", shown);
+		});
+		// A planned stack, clicked where it would land: undone.
+		then("AK ghost find", () -> {
+			int at = -1;
+			for (int i = 0; i < 36; i++) if (mc.player.getInventory().getStack(i).isEmpty() && BoxPicker.testPreviewInv(i).isOf(Items.GOLDEN_APPLE)) at = i;
+			dirtSlot[1] = at;
+			check("AK: the half shows as a planned stack", at >= 0);
+		});
+		drag(() -> BoxPicker.testInv(dirtSlot[1]), () -> BoxPicker.testCell(2), GLFW.GLFW_MOUSE_BUTTON_LEFT);
+		drop(GLFW.GLFW_MOUSE_BUTTON_LEFT);
+		then("AK6", () -> check("AK: dragged back, it's no longer planned (" + BoxPicker.testWant(10) + ")", BoxPicker.testWant(10) == 0));
+		// Confirm.
+		then("AK confirm on", () -> {
+			ModConfig.INSTANCE.boxPickerConfirm = true;
+			key(GLFW.GLFW_KEY_ENTER);
+		});
+		pause(3);
+		shot("19_confirm");
+		then("AK7", () -> {
+			check("AK: Enter asks first", BoxPicker.testConfirming() && !BoxGrab.running());
+			key(GLFW.GLFW_KEY_ESCAPE);
+		});
+		pause(2);
+		then("AK8", () -> {
+			check("AK: Esc goes back, plan intact", BoxPicker.isOpen() && !BoxPicker.testConfirming() && BoxPicker.testWant(9) == 16 && BoxPicker.testStore(dirtSlot[0]) == 32);
+			check("AK: still nothing moved", count(Items.ENDER_PEARL) == 0 && count(Items.DIRT) == 32);
+			key(GLFW.GLFW_KEY_ENTER);
+		});
+		pause(3);
+		then("AK9", () -> {
+			int[] at = BoxPicker.testButton("CONFIRM_GO");
+			mouseTo(at[0], at[1]);
+		});
+		pause(2);
+		then("AK click", () -> clickButton(GLFW.GLFW_MOUSE_BUTTON_LEFT, 0));
+		waitFor("the bot to start", 40, BoxGrab::running);
+		waitFor("the bot to finish", 1200, () -> !BoxGrab.running());
+		pause(5);
+		then("AK10", () -> {
+			check("AK: Confirm runs it: " + BoxGrab.lastMessage, BoxGrab.lastOk);
+			check("AK: exactly what was planned happened", count(Items.ENDER_PEARL) == 16 && count(Items.GOLDEN_APPLE) == 0 && count(Items.DIRT) == 0);
+			ItemStack box = mc.player.currentScreenHandler.slots.get(5).getStack();
+			check("AK: the box is back, holding the dirt", box.isOf(Items.RED_SHULKER_BOX) && contentsOf(box).stream().anyMatch(s -> s.isOf(Items.DIRT) && s.getCount() == 32));
+			ModConfig.INSTANCE.boxPickerConfirm = false;
+		});
+		checkWorldClean("AK");
+
+		// AL: take one thing, then a few, from the same box in an ender chest. It goes back to its own slot each time.
+		reset();
+		BlockPos[] again = new BlockPos[1];
+		then("AL set", () -> {
+			again[0] = origin.add(0, 0, 2);
+			cmd("setblock " + again[0].getX() + " " + again[0].getY() + " " + again[0].getZ() + " ender_chest");
+			cmd("item replace entity @s enderchest.3 with " + KIT);
+			cmd("item replace entity @s enderchest.4 with dirt 3");
+		});
+		pause(10);
+		then("AL open", () -> openBlockInView(again[0]));
+		waitFor("AL screen", 100, () -> mc.currentScreen instanceof GenericContainerScreen && mc.player.currentScreenHandler.getRevision() != 0);
+		pause(3);
+		openPickerOn(3);
+		clickCell(9, GLFW.GLFW_MOUSE_BUTTON_LEFT, GLFW.GLFW_MOD_SHIFT);
+		pause(2);
+		then("AL1", () -> check("AL: shift-click plans the one stack (" + BoxPicker.testWant(9) + ")", BoxPicker.testWant(9) == 16 && BoxPicker.testWant(10) == 0));
+		pressEnterAndWait();
+		then("AL2", () -> {
+			check("AL: one item out: " + BoxGrab.lastMessage, BoxGrab.lastOk && count(Items.ENDER_PEARL) == 16);
+			ItemStack box = mc.player.currentScreenHandler.slots.get(3).getStack();
+			check("AL: the box is back in its slot, without it", box.isOf(Items.RED_SHULKER_BOX) && contentsOf(box).stream().noneMatch(s -> s.isOf(Items.ENDER_PEARL)));
+			check("AL: and the ender chest screen is still open", mc.currentScreen instanceof GenericContainerScreen);
+			check("AL: it still knows the ender chest", again[0].equals(BoxGrab.openContainer(mc)));
+		});
+		openPickerOn(3);
+		clickCell(0, GLFW.GLFW_MOUSE_BUTTON_LEFT, GLFW.GLFW_MOD_SHIFT);
+		clickCell(10, GLFW.GLFW_MOUSE_BUTTON_LEFT, GLFW.GLFW_MOD_SHIFT);
+		clickCell(26, GLFW.GLFW_MOUSE_BUTTON_LEFT, GLFW.GLFW_MOD_SHIFT);
+		pause(2);
+		pressEnterAndWait();
+		then("AL3", () -> {
+			check("AL: then several out: " + BoxGrab.lastMessage, BoxGrab.lastOk && count(Items.GOLDEN_APPLE) == 64 && count(Items.FIREWORK_ROCKET) == 64);
+			ItemStack box = mc.player.currentScreenHandler.slots.get(3).getStack();
+			check("AL: the box is back again, with the rest", box.isOf(Items.RED_SHULKER_BOX) && contentsOf(box).stream().anyMatch(s -> s.isOf(Items.NETHERITE_SWORD)));
+			check("AL: nothing else in the ender chest moved", mc.player.currentScreenHandler.slots.get(4).getStack().isOf(Items.DIRT));
+		});
+		checkWorldClean("AL");
 
 		// AF: a screen no block opened isn't the chest you used last. The box must not go into that chest afterwards.
 		reset();

@@ -83,6 +83,8 @@ public final class ModConfig {
 	public boolean boxPickerInstant = false;
 	/** Don't take a box out with somebody within 8 blocks, or while being hurt. */
 	public boolean boxPickerGuard = true;
+	/** Show what's about to happen and ask, before the box manager does anything. */
+	public boolean boxPickerConfirm = true;
 
 	/** Per-type visibility; types missing from the map are shown. */
 	public Map<ContainerKind, Boolean> containers = new EnumMap<>(ContainerKind.class);

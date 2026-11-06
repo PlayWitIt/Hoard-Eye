@@ -52,6 +52,8 @@ public final class BoxPicker {
 	private static final int LEFT_W = COLS * CELL + PAD * 2, RIGHT_W = COLS * INV_CELL + 16, GAP = 4;
 	private static final int PANEL_H = 230, BUTTON_H = 20, GUARD_RADIUS = 8;
 	private static final long TYPE_WINDOW_MS = 1500;
+	/** Moved this far with the button down, it's a drag rather than a click. */
+	private static final int DRAG_START = 5;
 
 	private static final int BG = 0xF4101018, EDGE = 0xFF40E0FF, TITLE = 0xFFFFC040, TEXT = 0xFFF0F0F0, MUTED = 0xFF9AA0AC;
 	private static final int CELL_BG = 0xFF23232E, CELL_HOVER = 0xFF343446, PICKED_BG = 0xFF0E4A5C, STORE_BG = 0xFF4A3A0E, STORE_EDGE = 0xFFFFC040;
@@ -110,6 +112,15 @@ public final class BoxPicker {
 	/** Shrinks the whole panel to fit a small window or a big GUI scale: every button stays on screen. */
 	private static float fit = 1;
 	private static final List<Hit> hits = new ArrayList<>();
+	/** A stack being carried from one side to the other. With {@code dragBack}, a planned one going back where it came from. */
+	private static boolean dragging, dragFromInventory, dragMoved, dragBack;
+	private static int dragIndex, dragBefore, dragAmount;
+	private static ItemStack dragStack = ItemStack.EMPTY;
+	private static double pressX, pressY;
+	/** How both sides will look with the plan done, redrawn every frame. */
+	private static ItemStack[] previewInventory = new ItemStack[0], previewBox = new ItemStack[0];
+	/** The last look before anything happens. */
+	private static boolean confirming;
 	private static boolean painting, paintOn, paintInventory, draggingSpeed;
 	private static int lastPainted = -1;
 
@@ -146,7 +157,7 @@ public final class BoxPicker {
 			remembered = new ArrayList<>(entries);
 		}
 		screen = null;
-		painting = draggingSpeed = false;
+		painting = draggingSpeed = dragging = confirming = false;
 		focus = Focus.NONE;
 		ModConfig.save();
 	}
@@ -229,7 +240,7 @@ public final class BoxPicker {
 		screen = on;
 		page = 0;
 		bundleView = null;
-		painting = false;
+		painting = dragging = confirming = false;
 		selected = -1;
 		typed = "";
 		note = "";
@@ -553,6 +564,11 @@ public final class BoxPicker {
 		if (!typed.isEmpty() && System.currentTimeMillis() - typedAt > TYPE_WINDOW_MS) typed = "";
 
 		hits.clear();
+		updatePreview();
+		// Everything behind the confirm box is only there to be seen.
+		int realX = mouseX, realY = mouseY;
+		if (confirming) mouseX = mouseY = -9999;
+		if (dragging && Math.hypot(realX - pressX, realY - pressY) > DRAG_START) dragMoved = true;
 		int hovered = cellAt(mouseX, mouseY), hoveredInv = invAt(mouseX, mouseY);
 		int hoveredIndex = hovered >= 0 ? indexOf(hovered) : -1;
 		paintOver(hoveredIndex, hoveredInv);
@@ -571,7 +587,14 @@ public final class BoxPicker {
 			drawRight(client, context, font, mouseX, mouseY, hoveredInv);
 		}
 
-		drawTooltips(client, context, font, mouseX, mouseY, hoveredIndex, hoveredInv);
+		if (confirming) {
+			hits.clear();
+			drawConfirm(client, context, font, realX, realY);
+		} else if (dragging && dragMoved) {
+			drawDrag(context, font, realX, realY);
+		} else {
+			drawTooltips(client, context, font, mouseX, mouseY, hoveredIndex, hoveredInv);
+		}
 		context.getMatrices().popMatrix();
 	}
 
@@ -674,7 +697,10 @@ public final class BoxPicker {
 		if (picked) context.drawStrokedRectangle(x, y, size, size, EDGE);
 		else if (hovered && live) context.drawStrokedRectangle(x, y, size, size, 0xFFFFFFFF);
 		if (index == selected && !selectedIsInventory && live) context.drawStrokedRectangle(x - 1, y - 1, size + 2, size + 2, TITLE);
-		if (!live) return;
+		if (!live) {
+			if (index < previewBox.length && !previewBox[index].isEmpty()) drawGhost(context, font, previewBox[index], x, y, x + 2, y + 2, size, STORE_EDGE);
+			return;
+		}
 		int ix = x + 2, iy = y + 2;
 		context.drawItem(stack, ix, iy);
 		if (fromInside) context.drawStackOverlay(font, stack, ix, iy, "§b" + inner.picked());
@@ -776,6 +802,8 @@ public final class BoxPicker {
 		else if (hit != null && hasHint(hit.id())) text = tr("hint." + hintKey(hit.id()));
 		else if (bundleView != null && hit == null) text = tr("hint_bundle");
 		else if (hovered >= 0 && indexOf(hovered) >= 0 && isFullBundle(entry().contents.get(indexOf(hovered)))) text = tr("hint_bundle_cell");
+		else if (hovered >= 0 && indexOf(hovered) >= 0 && indexOf(hovered) < previewBox.length && entry().contents.get(indexOf(hovered)).isEmpty() && !previewBox[indexOf(hovered)].isEmpty()) text = tr("hint_ghost");
+		else if (hoveredInv >= 0 && inventory().getStack(hoveredInv).isEmpty() && hoveredInv < previewInventory.length && !previewInventory[hoveredInv].isEmpty()) text = tr("hint_ghost");
 		else if (hovered >= 0) text = tr("hint_box");
 		else if (hoveredInv >= 0) text = tr("hint_inv");
 		else if (!note.isEmpty()) text = note;
@@ -898,6 +926,10 @@ public final class BoxPicker {
 	private static void drawInvCell(DrawContext context, TextRenderer font, int i, boolean hovered) {
 		int x = invX(i), y = invY(i), size = INV_CELL - 1;
 		ItemStack stack = inventory().getStack(i);
+		if (stack.isEmpty() && i < previewInventory.length && !previewInventory[i].isEmpty()) {
+			drawGhost(context, font, previewInventory[i], x, y, x, y, size, EDGE);
+			return;
+		}
 		Entry e = top();
 		boolean going = e.store[i] > 0, others = storable(i) < stack.getCount() && !BoxGrab.isBox(stack);
 		context.fill(x, y, x + size, y + size, going ? STORE_BG : others ? 0xFF2A2412 : hovered && !stack.isEmpty() ? CELL_HOVER : CELL_BG);
@@ -906,12 +938,167 @@ public final class BoxPicker {
 		if (i == selected && selectedIsInventory) context.drawStrokedRectangle(x - 1, y - 1, size + 2, size + 2, TITLE);
 		if (stack.isEmpty()) return;
 		context.drawItem(stack, x, y);
+		int later = i < previewInventory.length && ItemStack.areItemsAndComponentsEqual(previewInventory[i], stack) ? previewInventory[i].getCount() : stack.getCount();
 		if (going && e.store[i] != stack.getCount()) context.drawStackOverlay(font, stack, x, y, "§e" + e.store[i]);
+		else if (later > stack.getCount()) context.drawStackOverlay(font, stack, x, y, "§b" + later);
 		else context.drawStackOverlay(font, stack, x, y);
 		if (BoxGrab.isBox(stack) || (!search.isEmpty() && !matches(stack))) {
 			context.createNewRootLayer();
 			context.fill(x, y, x + size, y + size, 0x90101018);
 		}
+	}
+
+	/** Something that isn't there yet, only planned: faint, outlined in the colour of where it's from. */
+	private static void drawGhost(DrawContext context, TextRenderer font, ItemStack stack, int x, int y, int ix, int iy, int size, int edge) {
+		context.fill(x, y, x + size, y + size, CELL_BG);
+		context.drawItem(stack, ix, iy);
+		context.drawStackOverlay(font, stack, ix, iy);
+		context.createNewRootLayer();
+		context.fill(x, y, x + size, y + size, 0x70101018);
+		context.drawStrokedRectangle(x, y, size, size, edge);
+	}
+
+	private static void updatePreview() {
+		List<BoxGrab.Request> plan = buildRequests();
+		previewInventory = BoxGrab.inventoryAfter(inventory(), plan);
+		previewBox = new ItemStack[0];
+		if (bundleView != null) return;
+		for (BoxGrab.Request r : plan) {
+			Entry e = top();
+			boolean mine = e.loose ? r.loose() : !r.loose() && r.sourceSlot() == e.slotId;
+			if (mine) previewBox = BoxGrab.boxAfter(r.contents(), r.want(), r.deposits());
+		}
+	}
+
+	private static int cellGhost(double x, double y) {
+		int cell = cellAt(x, y), index = cell >= 0 ? indexOf(cell) : -1;
+		return index >= 0 && index < previewBox.length && entry().contents.get(index).isEmpty() && !previewBox[index].isEmpty() ? index : -1;
+	}
+
+	private static int invGhost(double x, double y) {
+		int inv = invAt(x, y);
+		return inv >= 0 && inv < previewInventory.length && inventory().getStack(inv).isEmpty() && !previewInventory[inv].isEmpty() ? inv : -1;
+	}
+
+	private static boolean overLeft(double x, double y) {
+		return x >= left && x < left + LEFT_W && y >= top && y < top + bodyH;
+	}
+
+	private static boolean overRight(double x, double y) {
+		return wide && x >= rightX && x < rightX + RIGHT_W && y >= top && y < top + bodyH;
+	}
+
+	/** The tab under the mouse, if a box can be put into there: not a box's own, or anything but a real tab. */
+	private static int tabAt(double x, double y) {
+		Hit hit = hitAt(x, y);
+		return hit != null && hit.id().startsWith("TAB") && hit.id().length() > 3 && Character.isDigit(hit.id().charAt(3)) ? Integer.parseInt(hit.id().substring(3)) : -1;
+	}
+
+	private static void drawDrag(DrawContext context, TextRenderer font, int mouseX, int mouseY) {
+		context.createNewRootLayer();
+		boolean left = overLeft(mouseX, mouseY), right = overRight(mouseX, mouseY);
+		String label;
+		int color;
+		if (dragBack) {
+			boolean ok = dragFromInventory ? left : right;
+			label = ok ? tr("drop_undo") : "";
+			color = WARN;
+			if (ok) outline(context, left, WARN);
+		} else if (dragFromInventory) {
+			int tab = tabAt(mouseX, mouseY);
+			Entry into = tab >= 0 ? entries.get(tab) : top();
+			if (tab >= 0 || left) {
+				label = tr("drop_store", dragAmount);
+				color = WARN;
+				outline(context, true, WARN);
+				if (tab >= 0 && into != top()) label += " " + (into.loose ? tr("loose") : into.box.getName().getString());
+			} else {
+				label = right ? "" : tr("drop_cancel");
+				color = MUTED;
+			}
+		} else if (right) {
+			label = tr("drop_take", dragAmount);
+			color = GOOD;
+			outline(context, false, GOOD);
+		} else {
+			label = left ? "" : tr("drop_cancel");
+			color = MUTED;
+		}
+		context.createNewRootLayer();
+		context.drawItem(dragStack, mouseX - 8, mouseY - 8);
+		if (!dragBack) context.drawStackOverlay(font, dragStack, mouseX - 8, mouseY - 8, String.valueOf(dragAmount));
+		if (!label.isEmpty()) context.drawTextWithShadow(font, label, mouseX + 10, mouseY - 14, color);
+	}
+
+	private static void outline(DrawContext context, boolean leftSide, int color) {
+		context.drawStrokedRectangle(leftSide ? left : rightX, top, leftSide ? LEFT_W : RIGHT_W, bodyH, color);
+	}
+
+	private static String listOf(Map<String, ItemStack> kinds, Map<String, Integer> totals) {
+		List<String> parts = new ArrayList<>();
+		kinds.forEach((key, stack) -> parts.add(totals.get(key) + " " + stack.getName().getString()));
+		return String.join(", ", parts);
+	}
+
+	/** What's about to happen, box by box, in the order it'll happen. */
+	private static void drawConfirm(MinecraftClient client, DrawContext context, TextRenderer font, int mouseX, int mouseY) {
+		context.createNewRootLayer();
+		int total = LEFT_W + GAP + RIGHT_W, w = Math.min(total - 40, 300), h = Math.min(bodyH - 20, 190);
+		int x = left + (total - w) / 2, y = top + (bodyH - h) / 2, textW = w - 20;
+		context.fill(0, 0, (int) (context.getScaledWindowWidth() / fit) + 1, (int) (context.getScaledWindowHeight() / fit) + 1, 0x80000000);
+		panel(context, x, y, w, h);
+		context.drawTextWithShadow(font, tr("confirm_title"), x + 10, y + 8, TITLE);
+
+		List<Text> lines = new ArrayList<>();
+		for (Entry e : entriesInPlanOrder()) {
+			lines.add(e.loose ? Text.literal(tr("loose")).formatted(Formatting.WHITE, Formatting.BOLD) : e.box.getName().copy().formatted(Formatting.WHITE, Formatting.BOLD));
+			Map<String, ItemStack> got = new LinkedHashMap<>(), put = new LinkedHashMap<>();
+			Map<String, Integer> gotN = new LinkedHashMap<>(), putN = new LinkedHashMap<>();
+			addPicks(e, got, gotN);
+			for (Entry b : e.bundles.values()) addPicks(b, got, gotN);
+			for (int i = 0; i < e.store.length; i++) {
+				if (e.store[i] <= 0) continue;
+				ItemStack s = inventory().getStack(i);
+				put.putIfAbsent(Fetch.key(s), s);
+				putN.merge(Fetch.key(s), e.store[i], Integer::sum);
+			}
+			if (!got.isEmpty()) lines.add(Text.translatable("hoardeye.picker.confirm_take", listOf(got, gotN)).formatted(Formatting.GREEN));
+			if (!put.isEmpty()) lines.add(Text.translatable("hoardeye.picker.confirm_put", listOf(put, putN)).formatted(Formatting.GOLD));
+			if (e.tidy) lines.add(Text.translatable("hoardeye.picker.confirm_sort").formatted(Formatting.AQUA));
+		}
+		int buttonY = y + h - BUTTON_H - 8, footY = buttonY - 24, room = (footY - (y + 22)) / 10, line = 0, drawn = 0;
+		List<net.minecraft.text.OrderedText> wrapped = new ArrayList<>();
+		for (Text t : lines) wrapped.addAll(font.wrapLines(t, textW));
+		for (net.minecraft.text.OrderedText t : wrapped) {
+			if (line == room - 1 && wrapped.size() > room) {
+				context.drawTextWithShadow(font, tr("confirm_more", wrapped.size() - drawn), x + 10, y + 22 + line * 10, MUTED);
+				break;
+			}
+			context.drawTextWithShadow(font, t, x + 10, y + 22 + line * 10, TEXT);
+			line++;
+			drawn++;
+		}
+		Text problem = problem();
+		List<BoxGrab.Request> plan = buildRequests();
+		String time = problem != null ? font.trimToWidth(problem.getString(), textW)
+				: ModConfig.INSTANCE.boxPickerInstant && plan.stream().allMatch(r -> !r.loose() && r.deposits().isEmpty() && !r.tidy()) ? tr("eta_instant")
+				: tr("eta", String.format(Locale.ROOT, "%.1f", BoxGrab.estimateTicks(client.player, plan) / 20.0));
+		context.drawTextWithShadow(font, time, x + 10, footY, problem != null ? BAD : GOOD);
+		context.drawTextWithShadow(font, font.trimToWidth(tr("confirm_keys"), textW), x + 10, footY + 11, MUTED);
+		int half = (w - 24) / 2;
+		button(context, font, "CONFIRM_BACK", x + 10, buttonY, half, BUTTON_H, tr("confirm_back"), true, false, mouseX, mouseY);
+		button(context, font, "CONFIRM_GO", x + 14 + half, buttonY, half, BUTTON_H, tr("confirm_go"), canGo(), true, mouseX, mouseY);
+	}
+
+	/** The entries in the plan, in the order it runs them. */
+	private static List<Entry> entriesInPlanOrder() {
+		List<Entry> order = new ArrayList<>();
+		for (BoxGrab.Request r : buildRequests()) {
+			for (Entry e : entries) {
+				if (e.planned() && (r.loose() ? e.loose : !e.loose && e.slotId == r.sourceSlot())) order.add(e);
+			}
+		}
+		return order;
 	}
 
 	private static void drawKitChips(DrawContext context, TextRenderer font, int x, int y, int w, int mouseX, int mouseY) {
@@ -1244,6 +1431,12 @@ public final class BoxPicker {
 
 	private static void go() {
 		if (!canGo()) return;
+		if (ModConfig.INSTANCE.boxPickerConfirm && !confirming) {
+			typed = "";
+			focus = Focus.NONE;
+			confirming = true;
+			return;
+		}
 		MinecraftClient client = MinecraftClient.getInstance();
 		List<BoxGrab.Request> plan = buildRequests();
 		BoxKits.setLast(pickTotals());
@@ -1264,8 +1457,8 @@ public final class BoxPicker {
 		if (!ours(window)) return false;
 		MinecraftClient client = MinecraftClient.getInstance();
 		double x = client.mouse.getScaledX(client.getWindow()) / fit, y = client.mouse.getScaledY(client.getWindow()) / fit;
-		if (action == GLFW.GLFW_PRESS) mouseDown(x, y, input.button(), (input.modifiers() & GLFW.GLFW_MOD_SHIFT) != 0);
-		else if (action == GLFW.GLFW_RELEASE) mouseUp();
+		if (action == GLFW.GLFW_PRESS) mouseDown(x, y, input.button(), (input.modifiers() & GLFW.GLFW_MOD_SHIFT) != 0, (input.modifiers() & GLFW.GLFW_MOD_CONTROL) != 0);
+		else if (action == GLFW.GLFW_RELEASE) mouseUp(x, y);
 		return true;
 	}
 
@@ -1282,9 +1475,14 @@ public final class BoxPicker {
 		return true;
 	}
 
-	private static void mouseDown(double mouseX, double mouseY, int button, boolean shift) {
+	private static void mouseDown(double mouseX, double mouseY, int button, boolean shift, boolean ctrl) {
 		boolean primary = button == GLFW.GLFW_MOUSE_BUTTON_LEFT;
 		Hit hit = hitAt(mouseX, mouseY);
+		if (confirming) {
+			if (primary && hit != null && hit.id().equals("CONFIRM_GO")) go();
+			else if (primary && hit != null && hit.id().equals("CONFIRM_BACK")) confirming = false;
+			return;
+		}
 		if (focus != Focus.NONE && (hit == null || !hit.id().equals(focus == Focus.SEARCH ? "SEARCH" : "KITFIELD"))) {
 			if (focus == Focus.KIT_NAME) focus = Focus.NONE;
 			else focus = Focus.NONE;
@@ -1297,14 +1495,98 @@ public final class BoxPicker {
 		int cell = cellAt(mouseX, mouseY);
 		int index = cell >= 0 ? indexOf(cell) : -1;
 		if (index >= 0 && !entry().contents.get(index).isEmpty()) {
-			clickBoxCell(index, button, shift);
+			Entry e = entry();
+			ItemStack stack = e.contents.get(index);
+			// Those two open something when clicked, rather than being picked up.
+			boolean carry = !shift && !ctrl && button != GLFW.GLFW_MOUSE_BUTTON_MIDDLE && !lockedInBox(e, index) && !(bundleView == null && isFullBundle(stack));
+			int before = e.want[index];
+			clickBoxCell(index, button, shift, ctrl);
+			if (carry) startDrag(false, index, stack, before, amountFor(before, stack.getCount(), button), mouseX, mouseY);
 			return;
 		}
 		int inv = invAt(mouseX, mouseY);
-		if (inv >= 0 && !inventory().getStack(inv).isEmpty()) clickInvCell(inv, button, shift);
+		if (inv >= 0 && !inventory().getStack(inv).isEmpty()) {
+			ItemStack stack = inventory().getStack(inv);
+			boolean carry = !shift && !ctrl && button != GLFW.GLFW_MOUSE_BUTTON_MIDDLE && !BoxGrab.isBox(stack) && storable(inv) > 0;
+			int before = top().store[inv], max = storable(inv);
+			clickInvCell(inv, button, ctrl);
+			if (carry) startDrag(true, inv, stack, before, amountFor(before, max, button), mouseX, mouseY);
+			return;
+		}
+		if (primary) {
+			int ghost = invGhost(mouseX, mouseY), boxGhost = cellGhost(mouseX, mouseY);
+			if (ghost >= 0) startBack(true, previewInventory[ghost], mouseX, mouseY);
+			else if (boxGhost >= 0) startBack(false, previewBox[boxGhost], mouseX, mouseY);
+		}
 	}
 
-	private static void clickBoxCell(int index, int button, boolean shift) {
+	/** A partly chosen amount carries over; otherwise the whole stack, or half with the right button, as in the game. */
+	private static int amountFor(int before, int max, int button) {
+		if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT) return (max + 1) / 2;
+		return before > 0 && before < max ? before : max;
+	}
+
+	private static void startDrag(boolean fromInventory, int index, ItemStack stack, int before, int amount, double x, double y) {
+		dragging = true;
+		dragBack = dragMoved = false;
+		dragFromInventory = fromInventory;
+		dragIndex = index;
+		dragStack = stack.copy();
+		dragBefore = before;
+		dragAmount = amount;
+		pressX = x;
+		pressY = y;
+	}
+
+	private static void startBack(boolean fromInventory, ItemStack stack, double x, double y) {
+		startDrag(fromInventory, -1, stack, 0, stack.getCount(), x, y);
+		dragBack = true;
+	}
+
+	/** Where a carried stack comes down decides what it means. Anywhere that means nothing, and it's as if you'd never picked it up. */
+	private static void endDrag(double x, double y) {
+		dragging = false;
+		if (Math.hypot(x - pressX, y - pressY) > DRAG_START) dragMoved = true;
+		if (dragBack) {
+			if (!dragMoved || (dragFromInventory ? overLeft(x, y) : overRight(x, y))) unplan(dragStack, dragFromInventory);
+			return;
+		}
+		if (!dragMoved) return;
+		if (dragFromInventory) {
+			Entry e = top();
+			int tab = tabAt(x, y);
+			if (tab >= 0) {
+				e.store[dragIndex] = dragBefore;
+				switchTab(tab);
+				top().store[dragIndex] = Math.min(dragAmount, storable(dragIndex));
+			} else if (overLeft(x, y)) {
+				e.store[dragIndex] = dragAmount;
+			} else if (!overRight(x, y)) {
+				e.store[dragIndex] = dragBefore;
+			}
+		} else {
+			Entry e = entry();
+			if (overRight(x, y)) e.want[dragIndex] = dragAmount;
+			else if (!overLeft(x, y)) e.want[dragIndex] = dragBefore;
+		}
+	}
+
+	/** Forgets a planned stack: taking it, if it was on its way to you, or putting it in, if it was on its way to the box. */
+	private static void unplan(ItemStack kind, boolean wasComing) {
+		if (wasComing) {
+			for (Entry e : entries) {
+				for (int i = 0; i < e.want.length; i++) if (same(e.contents.get(i), kind)) e.want[i] = 0;
+				for (Entry b : e.bundles.values()) {
+					for (int i = 0; i < b.want.length; i++) if (same(b.contents.get(i), kind)) b.want[i] = 0;
+				}
+			}
+		} else {
+			Entry e = top();
+			for (int i = 0; i < e.store.length; i++) if (same(inventory().getStack(i), kind)) e.store[i] = 0;
+		}
+	}
+
+	private static void clickBoxCell(int index, int button, boolean shift, boolean every) {
 		Entry e = entry();
 		ItemStack stack = e.contents.get(index);
 		if (lockedInBox(e, index)) {
@@ -1326,8 +1608,9 @@ public final class BoxPicker {
 		}
 		select(index, false);
 		if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+			// Shift-click sends just this stack across, as in any chest. Ctrl-click sends every stack of the item.
 			paintOn = e.want[index] != stack.getCount();
-			if (shift) {
+			if (every) {
 				for (int i = 0; i < e.want.length; i++) {
 					if (same(e.contents.get(i), stack)) e.want[i] = paintOn ? e.contents.get(i).getCount() : 0;
 				}
@@ -1345,7 +1628,7 @@ public final class BoxPicker {
 		}
 	}
 
-	private static void clickInvCell(int inv, int button, boolean shift) {
+	private static void clickInvCell(int inv, int button, boolean every) {
 		Entry e = top();
 		if (bundleView != null) closeBundle();
 		if (BoxGrab.isBox(inventory().getStack(inv))) {
@@ -1359,7 +1642,7 @@ public final class BoxPicker {
 		ItemStack stack = inventory().getStack(inv);
 		if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
 			paintOn = e.store[inv] != max;
-			if (shift) {
+			if (every) {
 				for (int i = 0; i < PlayerInventory.MAIN_SIZE; i++) {
 					if (same(inventory().getStack(i), stack)) e.store[i] = paintOn ? storable(i) : 0;
 				}
@@ -1459,7 +1742,8 @@ public final class BoxPicker {
 		page = Math.max(0, Math.min(pages - 1, page + delta));
 	}
 
-	public static void mouseUp() {
+	public static void mouseUp(double x, double y) {
+		if (dragging) endDrag(x, y);
 		painting = false;
 		draggingSpeed = false;
 		lastPainted = -1;
@@ -1467,7 +1751,7 @@ public final class BoxPicker {
 
 	/** Scrolling over a slot changes how many; hold Shift to move in tens. Over the tabs or kits, it moves along them. */
 	public static void scroll(double x, double y, double amount, boolean shift) {
-		if (amount == 0) return;
+		if (amount == 0 || confirming) return;
 		int direction = amount > 0 ? 1 : -1, step = (shift ? 10 : 1) * direction;
 		if (y >= top + 6 && y < top + 26 && x >= left && x < left + LEFT_W) {
 			switchTab(current - direction);
@@ -1493,6 +1777,11 @@ public final class BoxPicker {
 	public static void key(KeyInput key, KeyBinding pickKey, KeyBinding inventoryKey) {
 		int code = key.key();
 		boolean ctrl = (key.modifiers() & GLFW.GLFW_MOD_CONTROL) != 0, shift = (key.modifiers() & GLFW.GLFW_MOD_SHIFT) != 0;
+		if (confirming) {
+			if (key.isEnter() || code == GLFW.GLFW_KEY_KP_ENTER) go();
+			else if (key.isEscape() || pickKey.matchesKey(key) || inventoryKey.matchesKey(key)) confirming = false;
+			return;
+		}
 		if (focus != Focus.NONE) {
 			keyInField(key, code, ctrl);
 			return;
@@ -1582,6 +1871,18 @@ public final class BoxPicker {
 	}
 
 	// ---- For the self-test ----
+
+	static boolean testConfirming() {
+		return confirming;
+	}
+
+	static ItemStack testPreviewInv(int i) {
+		return i < previewInventory.length ? previewInventory[i] : ItemStack.EMPTY;
+	}
+
+	static ItemStack testPreviewBox(int i) {
+		return i < previewBox.length ? previewBox[i] : ItemStack.EMPTY;
+	}
 
 	static int[] testCell(int i) {
 		return new int[]{(int) ((cellX(i) + CELL / 2) * fit), (int) ((cellY(i) + CELL / 2) * fit)};

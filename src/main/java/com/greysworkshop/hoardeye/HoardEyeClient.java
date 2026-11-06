@@ -698,6 +698,7 @@ public class HoardEyeClient implements ClientModInitializer {
 				ModsPanel.toggle(Text.translatable(P + ".shulker_shift"), Text.translatable(P + ".shulker_shift.desc"), () -> c.shulkerTooltipShiftOnly, v -> c.shulkerTooltipShiftOnly = v),
 				ModsPanel.toggle(Text.translatable(P + ".box_picker"), Text.translatable(P + ".box_picker.desc"), () -> c.boxPicker, v -> c.boxPicker = v),
 				ModsPanel.toggle(Text.translatable(P + ".box_picker_guard"), Text.translatable(P + ".box_picker_guard.desc"), () -> c.boxPickerGuard, v -> c.boxPickerGuard = v),
+				ModsPanel.toggle(Text.translatable(P + ".box_picker_confirm"), Text.translatable(P + ".box_picker_confirm.desc"), () -> c.boxPickerConfirm, v -> c.boxPickerConfirm = v),
 				ModsPanel.toggle(Text.translatable(P + ".box_picker_instant"), Text.translatable(P + ".box_picker_instant.desc"), () -> c.boxPickerInstant, v -> c.boxPickerInstant = v),
 				ModsPanel.section("Finding"),
 				ModsPanel.toggle(Text.translatable(P + ".locator_markers"), Text.translatable(P + ".locator_markers.desc"), () -> c.locatorMarkers, v -> c.locatorMarkers = v),
