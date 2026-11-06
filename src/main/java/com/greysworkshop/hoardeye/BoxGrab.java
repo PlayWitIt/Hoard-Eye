@@ -75,9 +75,9 @@ import java.util.Set;
  * still gets the box back, and from then on uses the step-by-step way.
  */
 public final class BoxGrab {
-	enum Step { IDLE, SNEAK, PLACE, OPEN, TAKE, BUNDLES, STORE, TIDY, CHECK, BREAK, COLLECT, REOPEN, PUT_BACK, SETTLE }
+	enum Step { IDLE, SNEAK, PLACE, OPEN, TAKE, BUNDLES, STORE, TIDY, ARRANGE, CHECK, BREAK, COLLECT, REOPEN, PUT_BACK, SETTLE, ARRANGE_INV }
 
-	private enum Phase { TAKE, BUNDLES, STORE, TIDY }
+	private enum Phase { TAKE, BUNDLES, STORE, TIDY, ARRANGE }
 
 	/** Part of what's inside a bundle sitting in slot {@code slot}: this many of this item. */
 	record BundlePick(int slot, ItemStack item, int amount) {}
@@ -88,7 +88,7 @@ public final class BoxGrab {
 	 */
 	record Request(int sourceSlot, boolean sourceIsInventory, int inventoryIndex, ItemStack box, List<ItemStack> contents,
 			int[] want, BlockPos container, int containerSlots, boolean fromInventoryScreen, List<ItemStack> deposits, boolean tidy, boolean loose,
-			List<BundlePick> bundlePicks) {}
+			List<BundlePick> bundlePicks, Map<Integer, ItemStack> pins) {}
 
 	private static final double REACH = 4.4;
 	/** Most clicks sent in one tick, so a big pick can't trip a server's packet limit. */
@@ -134,6 +134,10 @@ public final class BoxGrab {
 	/** The rest of the plan, and what has really been done so far. */
 	private static final java.util.ArrayDeque<Request> queue = new java.util.ArrayDeque<>();
 	private static final java.util.ArrayDeque<Phase> phases = new java.util.ArrayDeque<>();
+	/** Inventory slots to get right at the very end. */
+	private static Map<Integer, ItemStack> finalPins = new LinkedHashMap<>();
+	private static final Set<Integer> arrangeSkip = new HashSet<>();
+	private static int arrangePasses;
 	private static final Map<String, Integer> gotTotals = new LinkedHashMap<>(), storedTotals = new LinkedHashMap<>();
 	private static int boxesBack, runNumber, runTotal;
 	private static boolean stopRequested, storeFirst, looseRun, queueFailed;
@@ -400,7 +404,7 @@ public final class BoxGrab {
 		queueFailed = false;
 		anyTidy = false;
 		notes.clear();
-		request = new Request(-1, false, -1, new ItemStack(item), List.of(), new int[0], null, -1, false, List.of(), false, false, List.of());
+		request = new Request(-1, false, -1, new ItemStack(item), List.of(), new int[0], null, -1, false, List.of(), false, false, List.of(), Map.of());
 		savedYaw = p.getYaw();
 		savedPitch = p.getPitch();
 		savedSelected = inv.getSelectedSlot();
@@ -433,6 +437,13 @@ public final class BoxGrab {
 
 	/** Starts a plan of one or more parts. They run one after another; anything that goes wrong stops what's left. */
 	static void startQueue(MinecraftClient client, List<Request> plan) {
+		startQueue(client, plan, Map.of());
+	}
+
+	/** And, once the rest is done, these inventory slots end up holding exactly these. */
+	static void startQueue(MinecraftClient client, List<Request> plan, Map<Integer, ItemStack> inventoryPins) {
+		finalPins = new LinkedHashMap<>(inventoryPins);
+		pace = HUMAN_ACTION_TICKS * 100.0 / Math.max(10, ModConfig.INSTANCE.boxPickerSpeed);
 		queue.clear();
 		queue.addAll(plan);
 		gotTotals.clear();
@@ -451,6 +462,14 @@ public final class BoxGrab {
 	private static void startNext(MinecraftClient client) {
 		Request next = queue.poll();
 		if (next == null) {
+			if (!finalPins.isEmpty() && !queueFailed && !stopRequested) {
+				arrangeSkip.clear();
+				arrangePasses = 0;
+				nextAction = totalTicks;
+				if (request == null) request = new Request(-1, false, -1, ItemStack.EMPTY, List.of(), new int[0], null, -1, false, List.of(), false, true, List.of(), Map.of());
+				go(Step.ARRANGE_INV);
+				return;
+			}
 			finish(client);
 			return;
 		}
@@ -713,7 +732,7 @@ public final class BoxGrab {
 			if (i != hotbar && inv.getStack(i).isOf(boxItem)) otherBoxes.add(i);
 		}
 		boolean canBurst = ModConfig.INSTANCE.boxPickerInstant && burstWorks && testFailPlaces == 0 && !stopRequested
-				&& r.deposits().isEmpty() && !r.tidy() && r.bundlePicks().isEmpty() && !guardTripped(p, client.world)
+				&& r.deposits().isEmpty() && !r.tidy() && r.bundlePicks().isEmpty() && r.pins().isEmpty() && !guardTripped(p, client.world)
 				&& !p.isSneaking() && !client.options.sneakKey.isPressed();
 		int previousSync = h.syncId != 0 ? h.syncId : lastSync;
 		if (canBurst) {
@@ -791,6 +810,7 @@ public final class BoxGrab {
 	public static void onDisconnect() {
 		breaking = false;
 		queue.clear();
+		finalPins = new LinkedHashMap<>();
 		stopRequested = false;
 		swallowOpen = false;
 		burstWorks = true;
@@ -822,6 +842,8 @@ public final class BoxGrab {
 			case CHECK -> check(client, p);
 			case STORE -> store(client, p);
 			case TIDY -> tidy(client, p);
+			case ARRANGE -> arrangeBox(client, p);
+			case ARRANGE_INV -> arrangeInventory(client, p);
 			case BUNDLES -> bundles(client, p);
 			case BREAK -> breakBox(client, p, world);
 			case COLLECT -> collect(client, p, world);
@@ -1005,6 +1027,7 @@ public final class BoxGrab {
 			if (stores) phases.add(Phase.STORE);
 		}
 		if (request.tidy()) phases.add(Phase.TIDY);
+		if (!request.pins().isEmpty()) phases.add(Phase.ARRANGE);
 		nextPhase(client, p);
 	}
 
@@ -1039,6 +1062,11 @@ public final class BoxGrab {
 				go(Step.STORE);
 			}
 			case TIDY -> go(Step.TIDY);
+			case ARRANGE -> {
+				arrangeSkip.clear();
+				arrangePasses = 0;
+				go(Step.ARRANGE);
+			}
 			case BUNDLES -> {
 				List<BundlePick> picks = request.bundlePicks();
 				bundleLeft = new int[picks.size()];
@@ -1231,6 +1259,119 @@ public final class BoxGrab {
 			}
 		}
 		return false;
+	}
+
+	/** Puts things in the slots you put them in, one move per action. */
+	private static void arrangeBox(MinecraftClient client, ClientPlayerEntity p) {
+		ScreenHandler h = p.currentScreenHandler;
+		if (!workingOn(h) || stopRequested) {
+			nextPhase(client, p);
+			return;
+		}
+		if (!ready()) return;
+		List<Integer> scope = new ArrayList<>();
+		for (int i = 0; i < request.contents().size(); i++) scope.add(i);
+		if (arrangeOne(client, h, scope, request.pins())) {
+			acted();
+			return;
+		}
+		if (!arrangeSkip.isEmpty()) notes.add(Text.translatable("hoardeye.grab.not_arranged").getString());
+		askServer(p, Phase.ARRANGE);
+	}
+
+	/** The same for your inventory, last of all, wherever you've ended up. */
+	private static void arrangeInventory(MinecraftClient client, ClientPlayerEntity p) {
+		if (!ready()) return;
+		ScreenHandler h = p.currentScreenHandler;
+		PlayerInventory inv = p.getInventory();
+		List<Integer> scope = new ArrayList<>();
+		for (int i = 0; i < PlayerInventory.MAIN_SIZE; i++) scope.add(slotOf(h, inv, i));
+		scope.removeIf(id -> id < 0);
+		Map<Integer, ItemStack> pins = new LinkedHashMap<>();
+		finalPins.forEach((index, stack) -> {
+			int id = slotOf(h, inv, index);
+			if (id >= 0) pins.put(id, stack);
+		});
+		if (arrangeOne(client, h, scope, pins)) {
+			acted();
+			return;
+		}
+		if (!arrangeSkip.isEmpty()) notes.add(Text.translatable("hoardeye.grab.not_arranged").getString());
+		finalPins = new LinkedHashMap<>();
+		stop(client);
+		finish(client);
+	}
+
+	/**
+	 * One move towards every pinned slot holding exactly what it should, using only the slots in scope. False when
+	 * there's nothing left that can be done. Whatever is in the way goes to where the wanted thing came from, so it
+	 * never needs a free slot, and an item that isn't there just gets left out.
+	 */
+	private static boolean arrangeOne(MinecraftClient client, ScreenHandler h, List<Integer> scope, Map<Integer, ItemStack> pins) {
+		if (++arrangePasses > 400) return false;
+		for (Map.Entry<Integer, ItemStack> pin : pins.entrySet()) {
+			int id = pin.getKey();
+			ItemStack want = pin.getValue(), here = h.getSlot(id).getStack();
+			if (arrangeSkip.contains(id) || ItemStack.areEqual(here, want)) continue;
+			if (want.isEmpty()) {
+				int to = arrangeRoom(h, scope, pins, here, id);
+				if (to < 0) {
+					arrangeSkip.add(id);
+					continue;
+				}
+				move(client, h, id, to);
+				return true;
+			}
+			boolean sameKind = ItemStack.areItemsAndComponentsEqual(here, want);
+			if (sameKind && here.getCount() > want.getCount()) {
+				int to = arrangeRoom(h, scope, pins, here, id);
+				if (to < 0) {
+					arrangeSkip.add(id);
+					continue;
+				}
+				click(client, h, id, 0, SlotActionType.PICKUP);
+				for (int n = 0; n < want.getCount(); n++) click(client, h, id, 1, SlotActionType.PICKUP);
+				click(client, h, to, 0, SlotActionType.PICKUP);
+				if (!h.getCursorStack().isEmpty()) click(client, h, id, 0, SlotActionType.PICKUP);
+				return true;
+			}
+			int from = -1;
+			for (int s : scope) {
+				if (s == id) continue;
+				ItemStack there = h.getSlot(s).getStack();
+				if (!ItemStack.areItemsAndComponentsEqual(there, want)) continue;
+				ItemStack itsPin = pins.get(s);
+				if (itsPin != null && ItemStack.areItemsAndComponentsEqual(itsPin, there) && there.getCount() <= itsPin.getCount()) continue;
+				from = s;
+				break;
+			}
+			if (from < 0) {
+				arrangeSkip.add(id);
+				continue;
+			}
+			if (!here.isEmpty() && !sameKind) {
+				click(client, h, from, 0, SlotActionType.PICKUP);
+				click(client, h, id, 0, SlotActionType.PICKUP);
+				click(client, h, from, 0, SlotActionType.PICKUP);
+				return true;
+			}
+			int need = want.getCount() - (sameKind ? here.getCount() : 0);
+			click(client, h, from, 0, SlotActionType.PICKUP);
+			for (int n = 0; n < need && !h.getCursorStack().isEmpty(); n++) click(client, h, id, 1, SlotActionType.PICKUP);
+			if (!h.getCursorStack().isEmpty()) click(client, h, from, 0, SlotActionType.PICKUP);
+			return true;
+		}
+		return false;
+	}
+
+	/** Somewhere for what's left over: an empty slot that isn't meant to hold something else. */
+	private static int arrangeRoom(ScreenHandler h, List<Integer> scope, Map<Integer, ItemStack> pins, ItemStack item, int not) {
+		for (int s : scope) {
+			if (s == not || !h.getSlot(s).getStack().isEmpty()) continue;
+			ItemStack itsPin = pins.get(s);
+			if (itsPin == null || itsPin.isEmpty() || ItemStack.areItemsAndComponentsEqual(itsPin, item)) return s;
+		}
+		return -1;
 	}
 
 	/** Only when the server has confirmed the work is done does it go on, and only then does the box get broken. */
@@ -1510,7 +1651,7 @@ public final class BoxGrab {
 			walk(client, false);
 			notes.add(Text.translatable("hoardeye.grab.not_reopened").getString());
 			request = new Request(request.sourceSlot(), request.sourceIsInventory(), request.inventoryIndex(), request.box(), request.contents(),
-					request.want(), null, request.containerSlots(), false, request.deposits(), request.tidy(), request.loose(), request.bundlePicks());
+					request.want(), null, request.containerSlots(), false, request.deposits(), request.tidy(), request.loose(), request.bundlePicks(), request.pins());
 			go(Step.PUT_BACK);
 			putBack(client, p);
 			return;

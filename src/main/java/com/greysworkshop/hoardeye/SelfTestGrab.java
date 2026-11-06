@@ -227,12 +227,7 @@ public final class SelfTestGrab {
 		pause(3);
 		if (beforePicker != null) then(name + " before", beforePicker);
 		openPickerOn(3);
-		then(name + " all", () -> {
-			int[] at = BoxPicker.testButton("ALL");
-			mouseTo(at[0], at[1]);
-			clickButton(GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
-		});
-		pause(2);
+		hit("ALL");
 		pressEnterAndWait();
 		then(name + " results", () -> {
 			check(name + ": success: " + BoxGrab.lastMessage, BoxGrab.lastOk);
@@ -261,6 +256,13 @@ public final class SelfTestGrab {
 	private static void drop(int mouseButton) {
 		then("drop", () -> button(mouseButton, GLFW.GLFW_RELEASE, 0));
 		pause(2);
+	}
+
+	private static void pressEnterAndWait2() {
+		then("enter", () -> key(GLFW.GLFW_KEY_ENTER));
+		waitFor("the bot to start", 40, BoxGrab::running);
+		waitFor("the bot to finish", 1600, () -> !BoxGrab.running());
+		pause(5);
 	}
 
 	private static void openChest() {
@@ -338,12 +340,19 @@ public final class SelfTestGrab {
 	}
 
 	private static void hit(String name, int button, int modifiers) {
+		// Some live behind More: open it, press, and shut it again so what comes next sees the grids.
+		then("more for " + name, () -> BoxPicker.testSetMore(BoxPicker.testBehindMore(name)));
+		pause(2);
 		then("button " + name, () -> {
 			int[] at = BoxPicker.testButton(name);
 			mouseTo(at[0], at[1]);
 			clickButton(button, modifiers);
 		});
 		pause(2);
+		if (!name.equals("SEARCH") && !name.equals("SAVE")) {
+			then("more off", () -> BoxPicker.testSetMore(false));
+			pause(1);
+		}
 	}
 
 	private static void hit(String name) {
@@ -354,7 +363,8 @@ public final class SelfTestGrab {
 		then("click inventory " + index, () -> {
 			int[] at = BoxPicker.testInv(index);
 			mouseTo(at[0], at[1]);
-			clickButton(button, modifiers);
+			clickButton(button, button == GLFW.GLFW_MOUSE_BUTTON_LEFT && modifiers == 0 ? GLFW.GLFW_MOD_SHIFT : modifiers);
+			if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT && !BoxPicker.testCursor().isEmpty()) putDownIn(true);
 		});
 		pause(2);
 	}
@@ -401,12 +411,25 @@ public final class SelfTestGrab {
 		pause(10);
 	}
 
+	/** A plain left-click in these checks means "move this stack across", which is what Shift-click does now. */
 	private static void clickCell(int cell, int button, int modifiers) {
 		then("click cell " + cell, () -> {
 			int[] at = BoxPicker.testCell(cell);
 			mouseTo(at[0], at[1]);
-			clickButton(button, modifiers);
+			clickButton(button, button == GLFW.GLFW_MOUSE_BUTTON_LEFT && modifiers == 0 ? GLFW.GLFW_MOD_SHIFT : modifiers);
+			// Right-click holds half: put it down on your side, which is what "take half" comes to.
+			if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT && !BoxPicker.testCursor().isEmpty()) putDownIn(false);
 		});
+	}
+
+	private static void putDownIn(boolean box) {
+		for (int i = box ? 26 : 35; i >= 0; i--) {
+			if (!(box ? BoxPicker.testBoxSlot(i) : BoxPicker.testInvSlot(i)).isEmpty()) continue;
+			int[] at = box ? BoxPicker.testCell(i) : BoxPicker.testInv(i);
+			mouseTo(at[0], at[1]);
+			clickButton(GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+			return;
+		}
 	}
 
 	private static void pressEnterAndWait() {
@@ -634,12 +657,7 @@ public final class SelfTestGrab {
 		waitFor("ender chest screen", 100, () -> mc.currentScreen instanceof GenericContainerScreen && mc.player.currentScreenHandler.getRevision() != 0);
 		pause(3);
 		openPickerOn(3);
-		then("all", () -> {
-			int[] at = BoxPicker.testButton("ALL");
-			mouseTo(at[0], at[1]);
-			clickButton(GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
-		});
-		pause(2);
+		hit("ALL");
 		shot("4_picker_all");
 		pressEnterAndWait();
 		then("C results", () -> {
@@ -730,7 +748,7 @@ public final class SelfTestGrab {
 		clickCell(0, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
 		pause(3);
 		then("E", () -> {
-			check("E: full inventory is refused: " + BoxPicker.testProblem().orElse("(none)"), BoxPicker.testProblem().isPresent());
+			check("E: full inventory: it stays put and says why: " + BoxPicker.testNote(), BoxPicker.testWant(0) == 0 && !BoxPicker.testNote().isEmpty());
 			key(GLFW.GLFW_KEY_ENTER);
 			check("E: Enter does nothing", !BoxGrab.running() && BoxPicker.isOpen());
 			check("E: box not touched", mc.player.currentScreenHandler.slots.get(5).getStack().isOf(Items.RED_SHULKER_BOX));
@@ -822,7 +840,7 @@ public final class SelfTestGrab {
 		then("drag", () -> {
 			int[] at = BoxPicker.testCell(9);
 			mouseTo(at[0], at[1]);
-			button(GLFW.GLFW_MOUSE_BUTTON_LEFT, GLFW.GLFW_PRESS, 0);
+			button(GLFW.GLFW_MOUSE_BUTTON_LEFT, GLFW.GLFW_PRESS, GLFW.GLFW_MOD_SHIFT);
 		});
 		pause(2);
 		then("drag2", () -> {
@@ -832,12 +850,10 @@ public final class SelfTestGrab {
 		pause(3);
 		then("drag3", () -> {
 			button(GLFW.GLFW_MOUSE_BUTTON_LEFT, GLFW.GLFW_RELEASE, 0);
-			check("I: dragging across slots picks them all", BoxPicker.testWant(9) == 16 && BoxPicker.testWant(10) == 64);
+			check("I: Shift-dragging across slots moves them all", BoxPicker.testWant(9) == 16 && BoxPicker.testWant(10) == 64);
 		});
+		hit("CANCEL");
 		then("cancel", () -> {
-			int[] at = BoxPicker.testButton("CANCEL");
-			mouseTo(at[0], at[1]);
-			clickButton(GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
 			check("I: Cancel closes it and nothing moved", !BoxPicker.isOpen() && mc.player.currentScreenHandler.slots.get(5).getStack().isOf(Items.RED_SHULKER_BOX));
 		});
 
@@ -1068,8 +1084,10 @@ public final class SelfTestGrab {
 		openChest();
 		openPickerOn(5);
 		clickInv(9, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
-		then("R2a", () -> check("R2: a full box says so: " + BoxPicker.testProblem().orElse("(none)"), BoxPicker.testProblem().isPresent()));
+		then("R2a", () -> check("R2: a full box says so: " + BoxPicker.testNote(), !BoxPicker.testNote().isEmpty() && BoxPicker.testStore(9) == 0));
 		clickCell(0, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		pause(2);
+		clickInv(9, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
 		then("R2b", () -> check("R2: taking one out makes room: " + BoxPicker.testProblem().orElse("(none)"), BoxPicker.testProblem().isEmpty()));
 		pressEnterAndWait();
 		then("R2", () -> {
@@ -1125,12 +1143,10 @@ public final class SelfTestGrab {
 		hoverCell(8);
 		then("scroll", () -> scroll(1));
 		pause(2);
-		hit("P10");
-		hit("M1");
-		then("T5", () -> check("T: the amount bar works (" + BoxPicker.testWant(8) + ")", BoxPicker.testWant(8) == 10));
+		then("T5", () -> check("T: scrolling on a stack changes it (" + BoxPicker.testWant(8) + ")", BoxPicker.testWant(8) == 1));
 		shot("11_amount");
 		pressEnterAndWait();
-		then("T6", () -> check("T: exactly those amounts: " + BoxGrab.lastMessage, BoxGrab.lastOk && count(Items.ENDER_PEARL) == 40 && count(Items.GOLDEN_APPLE) == 10));
+		then("T6", () -> check("T: exactly those amounts: " + BoxGrab.lastMessage, BoxGrab.lastOk && count(Items.ENDER_PEARL) == 40 && count(Items.GOLDEN_APPLE) == 1));
 		checkWorldClean("T");
 
 		// U: sort: merged and in order, nothing lost.
@@ -1217,6 +1233,8 @@ public final class SelfTestGrab {
 		boxInChest(5);
 		openChest();
 		openPickerOn(5);
+		then("more", () -> BoxPicker.testSetMore(true));
+		pause(2);
 		then("slide", () -> {
 			int[] at = BoxPicker.testButton("SPEED");
 			mouseTo(at[0] - 70, at[1]);
@@ -1226,6 +1244,7 @@ public final class SelfTestGrab {
 			clickButton(GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
 			check("X: right end is fast (" + ModConfig.INSTANCE.boxPickerSpeed + ")", ModConfig.INSTANCE.boxPickerSpeed >= 475);
 			ModConfig.INSTANCE.boxPickerSpeed = 200;
+			BoxPicker.testSetMore(false);
 		});
 		pause(2);
 		hit("INSTANT");
@@ -1451,8 +1470,9 @@ public final class SelfTestGrab {
 		pick();
 		openChest();
 		openPickerOn(5);
-		clickCell(2, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
-		then("AD0", () -> check("AD: clicking a bundle goes inside it", BoxPicker.testInBundle()));
+		clickCell(2, GLFW.GLFW_MOUSE_BUTTON_MIDDLE, 0);
+		pause(2);
+		then("AD0", () -> check("AD: middle-click goes inside a bundle", BoxPicker.testInBundle()));
 		shot("15_bundle");
 		hoverCell(1);
 		keys(GLFW.GLFW_KEY_7);
@@ -1488,7 +1508,7 @@ public final class SelfTestGrab {
 		then("open", () -> clickButton(GLFW.GLFW_MOUSE_BUTTON_MIDDLE, 0));
 		pause(3);
 		hit("TAB0");
-		clickCell(0, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		clickCell(0, GLFW.GLFW_MOUSE_BUTTON_MIDDLE, 0);
 		pause(2);
 		clickCell(2, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
 		pause(2);
@@ -1553,7 +1573,7 @@ public final class SelfTestGrab {
 		// Every message the picker can show has to fit its panel.
 		then("texts", () -> {
 			for (String key : List.of("hint", "hint_box", "hint_inv", "hint_typing", "hint_bundle", "hint_bundle_cell", "safe", "no_pick", "no_spot", "no_room", "no_room_box", "cursor", "survival_only", "nobody", "amount_hint", "nothing_to_top_up",
-					"hint.tab", "hint.kit", "hint.last", "hint.all", "hint.none", "hint.tidy", "hint.instant", "hint.guard", "hint.topup", "hint.match", "hint.storeall", "hint.save", "hint.speed", "hint.take", "hint.cancel", "hint_ghost", "confirm_keys")) {
+					"hint.tab", "hint.kit", "hint.last", "hint.all", "hint.none", "hint.tidy", "hint.instant", "hint.guard", "hint.topup", "hint.match", "hint.storeall", "hint.save", "hint.speed", "hint.take", "hint.cancel", "hint.undo", "hint.more", "confirm_keys", "confirm_arrange", "holding")) {
 				int width = mc.textRenderer.getWidth(net.minecraft.text.Text.translatable("hoardeye.picker." + key));
 				int room = 198;
 				check("picker text '" + key + "' fits (" + width + " of " + room + ")", width <= room);
@@ -1601,60 +1621,56 @@ public final class SelfTestGrab {
 			check("AJ: still known as the container", hidden[0].equals(BoxGrab.openContainer(mc)));
 		});
 
-		// AK: drag and drop, then confirm. Nothing reaches the server until the confirm.
+		// AK: its own storage: drag, click to carry, right for half, undo. Then confirm, and the bot makes it real, slot for slot.
 		reset();
 		boxInChest(5);
-		then("AK have", () -> cmd("give @s dirt 32"));
+		then("AK have", () -> cmd("item replace entity @s hotbar.0 with dirt 32"));
 		pause(10);
 		openChest();
 		openPickerOn(5);
-		// Box to inventory: pearls in slot 9.
+		// Dragged out of the box into one particular slot.
 		drag(() -> BoxPicker.testCell(9), () -> BoxPicker.testInv(20), GLFW.GLFW_MOUSE_BUTTON_LEFT);
 		shot("18_dragging");
+		then("AK0", () -> {
+			check("AK: it's in your hand while dragging, and gone from its cell", BoxPicker.testCursor().isOf(Items.ENDER_PEARL) && BoxPicker.testBoxSlot(9).isEmpty());
+		});
 		drop(GLFW.GLFW_MOUSE_BUTTON_LEFT);
 		then("AK1", () -> {
-			check("AK: dragging a stack to the inventory plans it (" + BoxPicker.testWant(9) + ")", BoxPicker.testWant(9) == 16);
-			boolean shown = false;
-			for (int i = 0; i < 36; i++) shown |= BoxPicker.testPreviewInv(i).isOf(Items.ENDER_PEARL);
-			check("AK: it shows where it will land", shown);
+			check("AK: dropped, it's in that exact slot (" + BoxPicker.testInvSlot(20) + ")", BoxPicker.testInvSlot(20).isOf(Items.ENDER_PEARL) && BoxPicker.testInvSlot(20).getCount() == 16);
+			check("AK: that plans taking it (" + BoxPicker.testWant(9) + ")", BoxPicker.testWant(9) == 16);
 			check("AK: nothing has really moved", count(Items.ENDER_PEARL) == 0);
 		});
-		// Right button: half. Golden apples in slot 10.
-		drag(() -> BoxPicker.testCell(10), () -> BoxPicker.testInv(20), GLFW.GLFW_MOUSE_BUTTON_RIGHT);
-		drop(GLFW.GLFW_MOUSE_BUTTON_RIGHT);
-		then("AK2", () -> check("AK: right-drag plans half (" + BoxPicker.testWant(10) + ")", BoxPicker.testWant(10) == 32));
-		// Dropped on nothing: as if it never happened. Rockets in slot 26.
+		// Right-click takes half onto the mouse; a click elsewhere puts it down.
+		then("AK half", () -> {
+			int[] at = BoxPicker.testCell(10);
+			mouseTo(at[0], at[1]);
+			clickButton(GLFW.GLFW_MOUSE_BUTTON_RIGHT, 0);
+		});
+		pause(2);
+		then("AK2", () -> {
+			check("AK: right-click holds half (" + BoxPicker.testCursor() + ")", BoxPicker.testCursor().isOf(Items.GOLDEN_APPLE) && BoxPicker.testCursor().getCount() == 32);
+			int[] at = BoxPicker.testInv(30);
+			mouseTo(at[0], at[1]);
+			clickButton(GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		});
+		pause(2);
+		then("AK3", () -> check("AK: a click puts it down (" + BoxPicker.testInvSlot(30) + "), half stays (" + BoxPicker.testBoxSlot(10) + ")",
+				BoxPicker.testInvSlot(30).getCount() == 32 && BoxPicker.testBoxSlot(10).getCount() == 32 && BoxPicker.testWant(10) == 32));
+		// Undo steps back one move.
+		hit("UNDO");
+		then("AK4", () -> check("AK: Undo puts the apples back (" + BoxPicker.testWant(10) + ")", BoxPicker.testWant(10) == 0 && BoxPicker.testInvSlot(30).isEmpty() && BoxPicker.testBoxSlot(10).getCount() == 64));
+		// Dropped on nothing: as if it never happened.
 		drag(() -> BoxPicker.testCell(26), () -> new int[]{1, 1}, GLFW.GLFW_MOUSE_BUTTON_LEFT);
 		drop(GLFW.GLFW_MOUSE_BUTTON_LEFT);
-		then("AK3", () -> check("AK: dropped outside, it's cancelled (" + BoxPicker.testWant(26) + ")", BoxPicker.testWant(26) == 0));
-		// Dragged on a stack that was already planned, and dropped outside: left as it was.
-		drag(() -> BoxPicker.testCell(9), () -> new int[]{1, 1}, GLFW.GLFW_MOUSE_BUTTON_LEFT);
+		then("AK5", () -> check("AK: dropped outside, it goes back (" + BoxPicker.testWant(26) + ")", BoxPicker.testWant(26) == 0 && BoxPicker.testBoxSlot(26).isOf(Items.FIREWORK_ROCKET)));
+		// Inventory to one exact cell of the box.
+		drag(() -> BoxPicker.testInv(0), () -> BoxPicker.testCell(1), GLFW.GLFW_MOUSE_BUTTON_LEFT);
 		drop(GLFW.GLFW_MOUSE_BUTTON_LEFT);
-		then("AK4", () -> check("AK: a planned stack dropped outside stays planned (" + BoxPicker.testWant(9) + ")", BoxPicker.testWant(9) == 16));
-		// Inventory to box: the dirt, into an empty cell.
-		then("AK dirt", () -> {
-			int dirt = -1;
-			for (int i = 0; i < 36; i++) if (mc.player.getInventory().getStack(i).isOf(Items.DIRT)) dirt = i;
-			dirtSlot[0] = dirt;
-		});
-		drag(() -> BoxPicker.testInv(dirtSlot[0]), () -> BoxPicker.testCell(1), GLFW.GLFW_MOUSE_BUTTON_LEFT);
+		then("AK6", () -> check("AK: dragged into the box, in that cell (" + BoxPicker.testBoxSlot(1) + ")", BoxPicker.testBoxSlot(1).isOf(Items.DIRT) && BoxPicker.testStore(0) == 32));
+		// Shuffled inside the box: nothing needs to leave it.
+		drag(() -> BoxPicker.testCell(26), () -> BoxPicker.testCell(25), GLFW.GLFW_MOUSE_BUTTON_LEFT);
 		drop(GLFW.GLFW_MOUSE_BUTTON_LEFT);
-		then("AK5", () -> {
-			check("AK: dragging into the box plans putting it in (" + BoxPicker.testStore(dirtSlot[0]) + ")", BoxPicker.testStore(dirtSlot[0]) == 32);
-			boolean shown = false;
-			for (int i = 0; i < 27; i++) shown |= BoxPicker.testPreviewBox(i).isOf(Items.DIRT);
-			check("AK: and it shows in the box", shown);
-		});
-		// A planned stack, clicked where it would land: undone.
-		then("AK ghost find", () -> {
-			int at = -1;
-			for (int i = 0; i < 36; i++) if (mc.player.getInventory().getStack(i).isEmpty() && BoxPicker.testPreviewInv(i).isOf(Items.GOLDEN_APPLE)) at = i;
-			dirtSlot[1] = at;
-			check("AK: the half shows as a planned stack", at >= 0);
-		});
-		drag(() -> BoxPicker.testInv(dirtSlot[1]), () -> BoxPicker.testCell(2), GLFW.GLFW_MOUSE_BUTTON_LEFT);
-		drop(GLFW.GLFW_MOUSE_BUTTON_LEFT);
-		then("AK6", () -> check("AK: dragged back, it's no longer planned (" + BoxPicker.testWant(10) + ")", BoxPicker.testWant(10) == 0));
+		then("AK7", () -> check("AK: moved within the box isn't a take (" + BoxPicker.testWant(26) + ")", BoxPicker.testWant(26) == 0 && BoxPicker.testBoxSlot(25).isOf(Items.FIREWORK_ROCKET)));
 		// Confirm.
 		then("AK confirm on", () -> {
 			ModConfig.INSTANCE.boxPickerConfirm = true;
@@ -1662,34 +1678,98 @@ public final class SelfTestGrab {
 		});
 		pause(3);
 		shot("19_confirm");
-		then("AK7", () -> {
+		then("AK8", () -> {
 			check("AK: Enter asks first", BoxPicker.testConfirming() && !BoxGrab.running());
 			key(GLFW.GLFW_KEY_ESCAPE);
 		});
 		pause(2);
-		then("AK8", () -> {
-			check("AK: Esc goes back, plan intact", BoxPicker.isOpen() && !BoxPicker.testConfirming() && BoxPicker.testWant(9) == 16 && BoxPicker.testStore(dirtSlot[0]) == 32);
-			check("AK: still nothing moved", count(Items.ENDER_PEARL) == 0 && count(Items.DIRT) == 32);
-			key(GLFW.GLFW_KEY_ENTER);
-		});
-		pause(3);
 		then("AK9", () -> {
+			check("AK: Esc goes back, plan intact", BoxPicker.isOpen() && !BoxPicker.testConfirming() && BoxPicker.testWant(9) == 16 && BoxPicker.testStore(0) == 32);
+			check("AK: still nothing moved", count(Items.ENDER_PEARL) == 0 && count(Items.DIRT) == 32);
+		});
+		shot("20_main");
+		hit("TAKE");
+		pause(3);
+		then("AK10", () -> {
 			int[] at = BoxPicker.testButton("CONFIRM_GO");
 			mouseTo(at[0], at[1]);
 		});
 		pause(2);
 		then("AK click", () -> clickButton(GLFW.GLFW_MOUSE_BUTTON_LEFT, 0));
 		waitFor("the bot to start", 40, BoxGrab::running);
-		waitFor("the bot to finish", 1200, () -> !BoxGrab.running());
+		waitFor("the bot to finish", 1600, () -> !BoxGrab.running());
 		pause(5);
-		then("AK10", () -> {
+		then("AK11", () -> {
 			check("AK: Confirm runs it: " + BoxGrab.lastMessage, BoxGrab.lastOk);
 			check("AK: exactly what was planned happened", count(Items.ENDER_PEARL) == 16 && count(Items.GOLDEN_APPLE) == 0 && count(Items.DIRT) == 0);
+			check("AK: the pearls are in the very slot you chose (" + mc.player.getInventory().getStack(20) + ")", mc.player.getInventory().getStack(20).isOf(Items.ENDER_PEARL) && mc.player.getInventory().getStack(20).getCount() == 16);
 			ItemStack box = mc.player.currentScreenHandler.slots.get(5).getStack();
-			check("AK: the box is back, holding the dirt", box.isOf(Items.RED_SHULKER_BOX) && contentsOf(box).stream().anyMatch(s -> s.isOf(Items.DIRT) && s.getCount() == 32));
+			List<ItemStack> in = contentsOf(box);
+			check("AK: the dirt is in the very cell you chose (" + in.get(1) + ")", box.isOf(Items.RED_SHULKER_BOX) && in.get(1).isOf(Items.DIRT) && in.get(1).getCount() == 32);
+			check("AK: the rockets moved where you put them (" + in.get(25) + ", " + in.get(26) + ")", in.get(25).isOf(Items.FIREWORK_ROCKET) && in.get(26).isEmpty());
 			ModConfig.INSTANCE.boxPickerConfirm = false;
 		});
 		checkWorldClean("AK");
+
+		// AM: rearranging only your inventory is a plan of its own, and swaps work with no free slot needed.
+		reset();
+		boxInChest(5);
+		then("AM have", () -> {
+			cmd("item replace entity @s inventory.0 with dirt 5");
+			cmd("item replace entity @s inventory.1 with stone 7");
+		});
+		pause(10);
+		openChest();
+		openPickerOn(5);
+		drag(() -> BoxPicker.testInv(9), () -> BoxPicker.testInv(10), GLFW.GLFW_MOUSE_BUTTON_LEFT);
+		drop(GLFW.GLFW_MOUSE_BUTTON_LEFT);
+		then("AM1", () -> check("AM: dropped on stone, you hold the stone (" + BoxPicker.testCursor() + ")", BoxPicker.testCursor().isOf(Items.STONE)));
+		then("AM2", () -> {
+			int[] at = BoxPicker.testInv(9);
+			mouseTo(at[0], at[1]);
+			clickButton(GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		});
+		pause(2);
+		pressEnterAndWait2();
+		then("AM3", () -> {
+			check("AM: swapped for real (" + mc.player.getInventory().getStack(9) + ", " + mc.player.getInventory().getStack(10) + ")",
+					mc.player.getInventory().getStack(9).isOf(Items.STONE) && mc.player.getInventory().getStack(10).isOf(Items.DIRT));
+			check("AM: no box was touched", mc.player.currentScreenHandler.slots.get(5).getStack().isOf(Items.RED_SHULKER_BOX));
+		});
+
+		// AN: from one box's tab to another's: carried across, and it happens in the right order.
+		reset();
+		boxOf(5, "{slot:0,item:{id:\"diamond\",count:40}}");
+		boxOf(6, "{slot:0,item:{id:\"dirt\",count:1}}");
+		openChest();
+		openPickerOn(5);
+		then("AN carry", () -> {
+			int[] at = BoxPicker.testCell(0);
+			mouseTo(at[0], at[1]);
+			clickButton(GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		});
+		pause(2);
+		then("AN tab", () -> {
+			int[] at = BoxPicker.testButton("TAB2");
+			mouseTo(at[0], at[1]);
+			clickButton(GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		});
+		pause(2);
+		then("AN place", () -> {
+			int[] at = BoxPicker.testCell(5);
+			mouseTo(at[0], at[1]);
+			clickButton(GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		});
+		pause(2);
+		pressEnterAndWait2();
+		then("AN2", () -> {
+			check("AN: moved between boxes: " + BoxGrab.lastMessage, BoxGrab.lastOk);
+			List<ItemStack> first = contentsOf(mc.player.currentScreenHandler.slots.get(5).getStack()), second = contentsOf(mc.player.currentScreenHandler.slots.get(6).getStack());
+			check("AN: out of the first", first.stream().noneMatch(x -> x.isOf(Items.DIAMOND)));
+			check("AN: into that cell of the second (" + second.get(5) + ")", second.get(5).isOf(Items.DIAMOND) && second.get(5).getCount() == 40);
+			check("AN: nothing left on you", count(Items.DIAMOND) == 0);
+		});
+		checkWorldClean("AN");
 
 		// AL: take one thing, then a few, from the same box in an ender chest. It goes back to its own slot each time.
 		reset();
