@@ -36,6 +36,7 @@ public class ConfigScreen extends OptionsScreen {
 					r.toggle("box_picker", () -> c.boxPicker, v -> c.boxPicker = v);
 					r.slider("box_picker_speed", 50, 500, () -> c.boxPickerSpeed, v -> c.boxPickerSpeed = v / 25 * 25, v -> String.format(java.util.Locale.ROOT, "%.2gx a fast player", (v / 25 * 25) / 100.0));
 					r.toggle("box_picker_instant", () -> c.boxPickerInstant, v -> c.boxPickerInstant = v);
+					r.toggle("box_picker_guard", () -> c.boxPickerGuard, v -> c.boxPickerGuard = v);
 				}),
 				new Tab("label", r -> {
 					r.header("header.placement");

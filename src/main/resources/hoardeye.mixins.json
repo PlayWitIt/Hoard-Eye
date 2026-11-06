@@ -9,7 +9,9 @@
 		"HandledScreenTooltipMixin",
 		"InteractionManagerAccessor",
 		"InteractionManagerMixin",
-		"ItemStackMixin"
+		"ItemStackMixin",
+		"KeyboardMixin",
+		"MouseMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

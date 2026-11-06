@@ -81,6 +81,8 @@ public final class ModConfig {
 	public int boxPickerSpeed = 200;
 	/** Send place, open, take and break in one go instead of step by step. Ignores the speed. */
 	public boolean boxPickerInstant = false;
+	/** Don't take a box out with somebody within 8 blocks, or while being hurt. */
+	public boolean boxPickerGuard = true;
 
 	/** Per-type visibility; types missing from the map are shown. */
 	public Map<ContainerKind, Boolean> containers = new EnumMap<>(ContainerKind.class);

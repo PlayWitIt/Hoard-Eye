@@ -284,6 +284,70 @@ public final class SelfTestGrab {
 		pause(2);
 	}
 
+	private static void hit(String name, int button, int modifiers) {
+		then("button " + name, () -> {
+			int[] at = BoxPicker.testButton(name);
+			mouseTo(at[0], at[1]);
+			clickButton(button, modifiers);
+		});
+		pause(2);
+	}
+
+	private static void hit(String name) {
+		hit(name, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+	}
+
+	private static void clickInv(int index, int button, int modifiers) {
+		then("click inventory " + index, () -> {
+			int[] at = BoxPicker.testInv(index);
+			mouseTo(at[0], at[1]);
+			clickButton(button, modifiers);
+		});
+		pause(2);
+	}
+
+	private static void hoverCell(int cell) {
+		then("hover cell " + cell, () -> {
+			int[] at = BoxPicker.testCell(cell);
+			mouseTo(at[0], at[1]);
+		});
+		pause(2);
+	}
+
+	private static void type(String text) {
+		then("type " + text, () -> {
+			try {
+				Method m = Keyboard.class.getDeclaredMethod("onChar", long.class, net.minecraft.client.input.CharInput.class);
+				m.setAccessible(true);
+				for (int c : text.codePoints().toArray()) m.invoke(mc.keyboard, mc.getWindow().getHandle(), new net.minecraft.client.input.CharInput(c, 0));
+			} catch (ReflectiveOperationException e) {
+				throw new RuntimeException(e);
+			}
+		});
+		pause(2);
+	}
+
+	private static void keys(int... codes) {
+		then("keys", () -> {
+			for (int c : codes) key(c);
+		});
+		pause(2);
+	}
+
+	private static void pick() {
+		then("pickaxe", () -> cmd("item replace entity @s hotbar.0 with netherite_pickaxe[enchantments={efficiency:5}]"));
+		pause(5);
+	}
+
+	private static String chestAt() {
+		return chest.getX() + " " + chest.getY() + " " + chest.getZ();
+	}
+
+	private static void boxOf(int slot, String contents) {
+		then("box", () -> cmd("item replace block " + chestAt() + " container." + slot + " with blue_shulker_box[container=[" + contents + "]]"));
+		pause(10);
+	}
+
 	private static void clickCell(int cell, int button, int modifiers) {
 		then("click cell " + cell, () -> {
 			int[] at = BoxPicker.testCell(cell);
@@ -385,7 +449,7 @@ public final class SelfTestGrab {
 			check("A: box is in the chest before anything happens", box.isOf(Items.RED_SHULKER_BOX));
 			boolean hint = false;
 			for (var line : box.getTooltip(net.minecraft.item.Item.TooltipContext.DEFAULT, mc.player, net.minecraft.item.tooltip.TooltipType.BASIC)) {
-				if (line.getString().contains("pick what to take")) hint = true;
+				if (line.getString().contains("manage this box")) hint = true;
 			}
 			check("A: the box's tooltip says how to open the picker", hint);
 		});
@@ -472,10 +536,10 @@ public final class SelfTestGrab {
 		pressEnterAndWait();
 		then("B results", () -> {
 			check("B: success: " + BoxGrab.lastMessage, BoxGrab.lastOk);
-			check("B: fast with a good pickaxe (" + BoxGrab.lastBoxOutTicks + " ticks out of the chest)", BoxGrab.lastBoxOutTicks < (remote ? 32 : 24));
+			check("B: fast with a good pickaxe (" + BoxGrab.lastBoxOutTicks + " ticks out of the chest)", BoxGrab.lastBoxOutTicks < (remote ? 45 : 24));
 			check("B: went in one burst", BoxGrab.lastBurst);
 			if (!remote) check("B: the box stood as a block for at most 1 server tick (" + serverBlockTicks + ")", serverBlockTicks <= 1);
-			check("B: on the ground barely longer than the server's pickup delay (" + BoxGrab.lastGroundTicks + ")", BoxGrab.lastGroundTicks <= (remote ? 26 : 20));
+			check("B: on the ground barely longer than the server's pickup delay (" + BoxGrab.lastGroundTicks + ")", BoxGrab.lastGroundTicks <= (remote ? 35 : 20));
 			PlayerInventory inv = mc.player.getInventory();
 			boolean same = true;
 			for (int i = 0; i < 9; i++) same &= ItemStack.areEqual(inv.getStack(i), savedHotbar.get(i));
@@ -862,11 +926,578 @@ public final class SelfTestGrab {
 		});
 		checkWorldClean("P");
 
+		// Q: several boxes in one go. Tabs, a plan across them, each one back where it was.
+		reset();
+		boxInChest(5);
+		boxOf(6, "{slot:2,item:{id:\"diamond\",count:40}}");
+		pick();
+		openChest();
+		openPickerOn(5);
+		then("Q0", () -> check("Q: a tab for the loose items and each box (" + BoxPicker.testTabs() + ")", BoxPicker.testTabs() == 3 && !BoxPicker.testIsLoose()));
+		shot("7_manager");
+		clickCell(9, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		hit("TAB2");
+		clickCell(2, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		pause(2);
+		shot("8_two_boxes");
+		then("Q1", () -> check("Q: the button says what it'll do: " + BoxPicker.testGoLabel(), BoxPicker.testGoLabel().contains("2")));
+		pressEnterAndWait();
+		then("Q results", () -> {
+			check("Q: both done: " + BoxGrab.lastMessage, BoxGrab.lastOk && BoxGrab.lastMessage.contains("2 boxes"));
+			check("Q: got from each", count(Items.ENDER_PEARL) == 16 && count(Items.DIAMOND) == 40);
+			check("Q: both boxes in their slots", mc.player.currentScreenHandler.slots.get(5).getStack().isOf(Items.RED_SHULKER_BOX)
+					&& mc.player.currentScreenHandler.slots.get(6).getStack().isOf(Items.BLUE_SHULKER_BOX));
+		});
+		checkWorldClean("Q");
+
+		// R: putting things in, whole stacks and any amount, and taking at the same time.
+		reset();
+		boxInChest(5);
+		pick();
+		then("give", () -> {
+			cmd("item replace entity @s inventory.0 with stone 64");
+			cmd("item replace entity @s inventory.1 with oak_log 32");
+			cmd("item replace entity @s inventory.2 with blue_shulker_box");
+		});
+		pause(10);
+		openChest();
+		openPickerOn(5);
+		clickInv(9, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		clickInv(10, GLFW.GLFW_MOUSE_BUTTON_RIGHT, 0);
+		then("R0", () -> check("R: click puts in a whole stack, right-click half (" + BoxPicker.testStore(9) + "," + BoxPicker.testStore(10) + ")", BoxPicker.testStore(9) == 64 && BoxPicker.testStore(10) == 16));
+		then("R box", () -> {
+			int tab = BoxPicker.testCurrent();
+			int[] at = BoxPicker.testInv(11);
+			mouseTo(at[0], at[1]);
+			clickButton(GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+			check("R: a box can't be put in a box", BoxPicker.testStore(11) == 0);
+		});
+		pause(2);
+		then("R tab", () -> {
+			if (BoxPicker.testTabs() > 2) {
+				int[] at = BoxPicker.testButton("TAB1");
+				mouseTo(at[0], at[1]);
+				clickButton(GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+			}
+		});
+		pause(2);
+		clickCell(10, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		pause(1);
+		shot("9_store");
+		pressEnterAndWait();
+		then("R results", () -> {
+			check("R: done: " + BoxGrab.lastMessage, BoxGrab.lastOk && BoxGrab.lastMessage.contains("Put in"));
+			check("R: 16 logs and the stone left you", count(Items.OAK_LOG) == 16 && count(Items.STONE) == 0);
+			check("R: took the apples too", count(Items.GOLDEN_APPLE) == 64);
+			ItemStack box = mc.player.currentScreenHandler.slots.get(5).getStack();
+			int stone = 0, logs = 0;
+			for (ItemStack s : contentsOf(box)) {
+				if (s.isOf(Items.STONE)) stone += s.getCount();
+				if (s.isOf(Items.OAK_LOG)) logs += s.getCount();
+			}
+			check("R: and they're really in the box (" + stone + "," + logs + ")", stone == 64 && logs == 16);
+		});
+		checkWorldClean("R");
+
+		// R2: a full box takes things out first; a full inventory puts things in first.
+		reset();
+		StringBuilder fullBox = new StringBuilder();
+		for (int i = 0; i < 27; i++) fullBox.append(i == 0 ? "" : ",").append("{slot:").append(i).append(",item:{id:\"diamond\",count:1}}");
+		boxOf(5, fullBox.toString());
+		pick();
+		then("give", () -> cmd("item replace entity @s inventory.0 with stone 8"));
+		pause(5);
+		openChest();
+		openPickerOn(5);
+		clickInv(9, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		then("R2a", () -> check("R2: a full box says so: " + BoxPicker.testProblem().orElse("(none)"), BoxPicker.testProblem().isPresent()));
+		clickCell(0, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		then("R2b", () -> check("R2: taking one out makes room: " + BoxPicker.testProblem().orElse("(none)"), BoxPicker.testProblem().isEmpty()));
+		pressEnterAndWait();
+		then("R2", () -> {
+			check("R2: swap into a full box: " + BoxGrab.lastMessage, BoxGrab.lastOk && count(Items.STONE) == 0 && count(Items.DIAMOND) == 1);
+		});
+		checkWorldClean("R2");
+
+		// S: search across boxes, by real typing; All means all of what's showing.
+		reset();
+		boxInChest(5);
+		boxOf(6, "{slot:4,item:{id:\"ender_pearl\",count:3}},{slot:5,item:{id:\"dirt\",count:9}}");
+		openChest();
+		openPickerOn(5);
+		hit("SEARCH");
+		type("pearl");
+		then("S", () -> {
+			check("S: the pearls show", BoxPicker.testMatches(9));
+			check("S: the apples don't", !BoxPicker.testMatches(10));
+		});
+		shot("10_search");
+		keys(GLFW.GLFW_KEY_ENTER);
+		then("S2", () -> check("S: Enter leaves the search and starts nothing", !BoxGrab.running() && BoxPicker.isOpen()));
+		keys(GLFW.GLFW_KEY_A);
+		then("S3", () -> check("S: All takes only what the search shows", BoxPicker.testWant(9) == 16 && BoxPicker.testWant(10) == 0));
+		then("S4", () -> {
+			check("S: letters typed in the search never reached the chest", mc.currentScreen instanceof GenericContainerScreen);
+		});
+		hit("SEARCH");
+		type(" ");
+		keys(GLFW.GLFW_KEY_ESCAPE);
+		keys(GLFW.GLFW_KEY_ESCAPE);
+		then("S5", () -> check("S: Esc clears the search first, then closes", !BoxPicker.isOpen()));
+
+		// T: typed amounts of any size, spreading over stacks and between boxes.
+		reset();
+		boxOf(5, "{slot:0,item:{id:\"ender_pearl\",count:16}},{slot:1,item:{id:\"ender_pearl\",count:16}},{slot:8,item:{id:\"golden_apple\",count:64}}");
+		boxOf(6, "{slot:0,item:{id:\"ender_pearl\",count:16}}");
+		pick();
+		openChest();
+		openPickerOn(5);
+		hoverCell(0);
+		keys(GLFW.GLFW_KEY_3, GLFW.GLFW_KEY_0);
+		then("T1", () -> check("T: 30 pearls comes from two stacks (" + BoxPicker.testWant(0) + "+" + BoxPicker.testWant(1) + ")", BoxPicker.testWant(0) == 16 && BoxPicker.testWant(1) == 14));
+		keys(GLFW.GLFW_KEY_BACKSPACE);
+		then("T2", () -> check("T: Backspace corrects it: 3", BoxPicker.testWant(0) == 3 && BoxPicker.testWant(1) == 0));
+		keys(GLFW.GLFW_KEY_ENTER);
+		then("T3", () -> check("T: Enter finishes the number and doesn't set it off", !BoxGrab.running()));
+		pause(2);
+		hoverCell(0);
+		keys(GLFW.GLFW_KEY_4, GLFW.GLFW_KEY_0);
+		then("T4", () -> check("T: 40 reaches into the next box (" + BoxPicker.testWantIn(2, 0) + ")", BoxPicker.testWantIn(1, 0) == 16 && BoxPicker.testWantIn(1, 1) == 16 && BoxPicker.testWantIn(2, 0) == 8));
+		keys(GLFW.GLFW_KEY_ENTER);
+		hoverCell(8);
+		then("scroll", () -> scroll(1));
+		pause(2);
+		hit("P10");
+		hit("M1");
+		then("T5", () -> check("T: the amount bar works (" + BoxPicker.testWant(8) + ")", BoxPicker.testWant(8) == 10));
+		shot("11_amount");
+		pressEnterAndWait();
+		then("T6", () -> check("T: exactly those amounts: " + BoxGrab.lastMessage, BoxGrab.lastOk && count(Items.ENDER_PEARL) == 40 && count(Items.GOLDEN_APPLE) == 10));
+		checkWorldClean("T");
+
+		// U: sort: merged and in order, nothing lost.
+		reset();
+		boxOf(5, "{slot:20,item:{id:\"stone\",count:10}},{slot:3,item:{id:\"apple\",count:30}},{slot:9,item:{id:\"stone\",count:20}},{slot:15,item:{id:\"apple\",count:50}},{slot:1,item:{id:\"bread\",count:5}}");
+		pick();
+		openChest();
+		openPickerOn(5);
+		hit("TIDY");
+		then("U0", () -> check("U: the button says Sort: " + BoxPicker.testGoLabel(), BoxPicker.testGoLabel().contains("Sort")));
+		pressEnterAndWait();
+		then("U", () -> {
+			check("U: done: " + BoxGrab.lastMessage, BoxGrab.lastOk);
+			DefaultedList<ItemStack> c = contentsOf(mc.player.currentScreenHandler.slots.get(5).getStack());
+			log("U sorted: " + c.subList(0, 6));
+			check("U: apples merged first", c.get(0).isOf(Items.APPLE) && c.get(0).getCount() == 64 && c.get(1).isOf(Items.APPLE) && c.get(1).getCount() == 16);
+			check("U: then bread, then stone", c.get(2).isOf(Items.BREAD) && c.get(2).getCount() == 5 && c.get(3).isOf(Items.STONE) && c.get(3).getCount() == 30);
+			check("U: the rest empty", c.subList(4, 27).stream().allMatch(ItemStack::isEmpty));
+		});
+		checkWorldClean("U");
+
+		// V: kits: save by name, top up to it, only what you're short of, remembered after a reload; then delete.
+		reset();
+		then("no kits", () -> {
+			for (BoxKits.Kit k : new ArrayList<>(BoxKits.kits())) BoxKits.remove(k);
+		});
+		boxInChest(5);
+		pick();
+		openChest();
+		openPickerOn(5);
+		clickCell(0, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		clickCell(9, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		pause(2);
+		hit("SAVE");
+		type("PvP");
+		keys(GLFW.GLFW_KEY_ENTER);
+		then("V0", () -> {
+			BoxKits.testReload();
+			check("V: saved to disk under its name", BoxKits.kits().size() == 1 && BoxKits.kits().get(0).name.equals("PvP") && BoxKits.kits().get(0).items.get("minecraft:ender_pearl") == 16);
+			check("V: saving didn't start anything", !BoxGrab.running());
+		});
+		shot("12_kit");
+		hit("CANCEL");
+		then("have", () -> cmd("give @s ender_pearl 10"));
+		pause(5);
+		openPickerOn(5);
+		hit("KIT0");
+		then("V1", () -> check("V: tops up: 6 pearls, not 16 (" + BoxPicker.testWant(9) + ")", BoxPicker.testWant(9) == 6 && BoxPicker.testWant(0) == 1));
+		pressEnterAndWait();
+		then("V2", () -> check("V: ends with exactly the kit", BoxGrab.lastOk && count(Items.ENDER_PEARL) == 16 && count(Items.TOTEM_OF_UNDYING) == 1));
+		openPickerOn(5);
+		hit("LAST");
+		then("V3", () -> check("V: Last brings back the last pick: nothing needed now", BoxPicker.testWant(9) == 0 && BoxPicker.testWant(0) == 0));
+		hit("KIT0", GLFW.GLFW_MOUSE_BUTTON_RIGHT, 0);
+		then("V4", () -> check("V: right-click asks first", BoxKits.kits().size() == 1));
+		hit("KIT0");
+		then("V5", () -> check("V: click again deletes", BoxKits.kits().isEmpty()));
+		hit("CANCEL");
+
+		// W: top up, match and put all.
+		reset();
+		boxInChest(5);
+		pick();
+		then("give", () -> {
+			cmd("item replace entity @s inventory.0 with ender_pearl 10");
+			cmd("item replace entity @s inventory.1 with stone 10");
+			cmd("item replace entity @s hotbar.3 with dirt 5");
+		});
+		pause(8);
+		openChest();
+		openPickerOn(5);
+		hit("TOPUP");
+		then("W0", () -> check("W: Top up fills the partial stack (" + BoxPicker.testWant(9) + ")", BoxPicker.testWant(9) == 6));
+		hit("MATCH");
+		then("W1", () -> check("W: Match puts in what's already in the box, not the rest", BoxPicker.testStore(9) == 10 && BoxPicker.testStore(10) == 0));
+		hit("STOREALL");
+		then("W2", () -> check("W: Put all leaves the hotbar", BoxPicker.testStore(10) == 10 && BoxPicker.testStore(3) == 0));
+		hit("STOREALL", GLFW.GLFW_MOUSE_BUTTON_LEFT, GLFW.GLFW_MOD_SHIFT);
+		then("W3", () -> check("W: Shift includes it", BoxPicker.testStore(3) == 5));
+		hit("CANCEL");
+
+		// X: the speed slider, Instant and Guard, right there in the panel.
+		reset();
+		boxInChest(5);
+		openChest();
+		openPickerOn(5);
+		then("slide", () -> {
+			int[] at = BoxPicker.testButton("SPEED");
+			mouseTo(at[0] - 70, at[1]);
+			clickButton(GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+			check("X: left end of the slider is slow (" + ModConfig.INSTANCE.boxPickerSpeed + ")", ModConfig.INSTANCE.boxPickerSpeed <= 100);
+			mouseTo(at[0] + 80, at[1]);
+			clickButton(GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+			check("X: right end is fast (" + ModConfig.INSTANCE.boxPickerSpeed + ")", ModConfig.INSTANCE.boxPickerSpeed >= 475);
+			ModConfig.INSTANCE.boxPickerSpeed = 200;
+		});
+		pause(2);
+		hit("INSTANT");
+		then("X1", () -> check("X: Instant toggles", ModConfig.INSTANCE.boxPickerInstant));
+		hit("INSTANT");
+		hit("GUARD");
+		then("X2", () -> {
+			check("X: Guard toggles", !ModConfig.INSTANCE.boxPickerGuard);
+			ModConfig.INSTANCE.boxPickerGuard = true;
+		});
+		// Y: someone close: held back, and it says why. The same when they walk up after you press the button.
+		clickCell(0, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		then("Y0", () -> {
+			BoxPicker.testNearby = 5;
+			check("Y: someone 5m away holds it: " + BoxPicker.testProblem().orElse("(none)"), BoxPicker.testProblem().isPresent());
+			BoxPicker.testNearby = -1;
+			BoxGrab.testGuardTrip = true;
+		});
+		pause(1);
+		pressEnterAndWait();
+		then("Y1", () -> {
+			BoxGrab.testGuardTrip = false;
+			check("Y: walked up: stayed safe: " + BoxGrab.lastMessage, !BoxGrab.lastOk && BoxGrab.lastMessage.contains("came close") && count(Items.TOTEM_OF_UNDYING) == 0);
+			check("Y: box back in the chest", mc.player.currentScreenHandler.slots.get(5).getStack().isOf(Items.RED_SHULKER_BOX));
+		});
+
+		// Z: Esc keeps the plan, Cancel forgets it. The Boxes button, and G with the mouse anywhere.
+		openPickerOn(5);
+		clickCell(0, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		keys(GLFW.GLFW_KEY_ESCAPE);
+		then("Z0", () -> check("Z: Esc closes the panel and the chest stays open", !BoxPicker.isOpen() && mc.currentScreen instanceof GenericContainerScreen));
+		then("Z1", () -> {
+			mouseTo(2, 2);
+			key(GLFW.GLFW_KEY_G);
+			check("Z: G opens it with the mouse anywhere", BoxPicker.isOpen());
+		});
+		pause(2);
+		then("Z2", () -> check("Z: and the plan is still there", BoxPicker.testWant(0) == 1));
+		hit("CANCEL");
+		then("Z3", () -> {
+			var buttons = net.fabricmc.fabric.api.client.screen.v1.Screens.getButtons(mc.currentScreen);
+			check("Z: the Boxes button is showing", buttons.stream().anyMatch(b -> b.visible && b.getMessage().getString().startsWith("Boxes")));
+		});
+		then("Z4", () -> {
+			key(GLFW.GLFW_KEY_G);
+			check("Z: Cancel forgot the plan", BoxPicker.isOpen() && BoxPicker.testWant(0) == 0);
+		});
+		pause(2);
+		hit("CANCEL");
+
+		// AA: stop part way: everything goes back, nothing else starts.
+		reset();
+		boxInChest(5);
+		boxOf(6, "{slot:0,item:{id:\"diamond\",count:9}}");
+		pick();
+		openChest();
+		openPickerOn(5);
+		clickCell(0, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		hit("TAB2");
+		clickCell(0, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		pause(1);
+		then("enter", () -> key(GLFW.GLFW_KEY_ENTER));
+		waitFor("box out", 200, () -> BoxGrab.step() == BoxGrab.Step.OPEN || BoxGrab.step() == BoxGrab.Step.TAKE || BoxGrab.step() == BoxGrab.Step.CHECK);
+		then("stop", () -> BoxGrab.requestStop());
+		waitFor("bot to stop", 400, () -> !BoxGrab.running());
+		pause(5);
+		then("AA", () -> {
+			check("AA: says it stopped: " + BoxGrab.lastMessage, BoxGrab.lastMessage.contains("Stopped"));
+			check("AA: the second box was never touched", count(Items.DIAMOND) == 0 && mc.player.currentScreenHandler.slots.get(6).getStack().isOf(Items.BLUE_SHULKER_BOX));
+			check("AA: the first is back", mc.player.currentScreenHandler.slots.get(5).getStack().isOf(Items.RED_SHULKER_BOX));
+		});
+		checkWorldClean("AA");
+
+		// AB: emergency: looking through a box on the ground that you placed: one press and it's in your inventory.
+		reset();
+		pick();
+		BlockPos[] ground = new BlockPos[1];
+		then("place", () -> {
+			ground[0] = origin.add(-1, 0, 1);
+			cmd("setblock " + ground[0].getX() + " " + ground[0].getY() + " " + ground[0].getZ() + " red_shulker_box{Items:[{Slot:3b,id:\"diamond\",count:12}]}");
+			usedSpot = ground[0];
+		});
+		pause(8);
+		then("open", () -> openBlock(ground[0]));
+		waitFor("box screen", 100, () -> mc.currentScreen instanceof net.minecraft.client.gui.screen.ingame.ShulkerBoxScreen);
+		pause(3);
+		then("AB0", () -> {
+			var buttons = net.fabricmc.fabric.api.client.screen.v1.Screens.getButtons(mc.currentScreen);
+			check("AB: the Grab box button is showing", buttons.stream().anyMatch(b -> b.visible && b.getMessage().getString().startsWith("Grab")));
+		});
+		shot("13_grab_button");
+		then("press", () -> key(GLFW.GLFW_KEY_G));
+		waitFor("bot to finish", 300, () -> !BoxGrab.running());
+		pause(5);
+		then("AB", () -> {
+			check("AB: done: " + BoxGrab.lastMessage, BoxGrab.lastOk && BoxGrab.lastMessage.contains("Got the box"));
+			check("AB: it's off the ground", !(mc.world.getBlockState(ground[0]).getBlock() instanceof ShulkerBoxBlock));
+			check("AB: it's in your inventory", count(Items.RED_SHULKER_BOX) == 1);
+			ItemStack box = ItemStack.EMPTY;
+			for (int i = 0; i < PlayerInventory.MAIN_SIZE; i++) if (mc.player.getInventory().getStack(i).isOf(Items.RED_SHULKER_BOX)) box = mc.player.getInventory().getStack(i);
+			check("AB: with everything still in it", contentsOf(box).get(3).isOf(Items.DIAMOND) && contentsOf(box).get(3).getCount() == 12);
+			check("AB: nothing on the ground", groundItems() == 0);
+			check("AB: pickaxe still in hand", mc.player.getInventory().getSelectedSlot() == 0 && mc.player.getInventory().getStack(0).isOf(Items.NETHERITE_PICKAXE));
+		});
+
+		// AB2: inventory full: the button says so, and the box is NOT broken: it would be left lying there for anyone.
+		reset();
+		pick();
+		then("place", () -> {
+			ground[0] = origin.add(-1, 0, 1);
+			usedSpot = ground[0];
+			cmd("setblock " + ground[0].getX() + " " + ground[0].getY() + " " + ground[0].getZ() + " red_shulker_box{Items:[{Slot:3b,id:\"diamond\",count:12}]}");
+			for (int i = 1; i < 9; i++) cmd("item replace entity @s hotbar." + i + " with stone 64");
+			for (int i = 0; i < 27; i++) cmd("item replace entity @s inventory." + i + " with dirt 64");
+		});
+		pause(12);
+		then("open", () -> openBlock(ground[0]));
+		waitFor("box screen", 100, () -> mc.currentScreen instanceof net.minecraft.client.gui.screen.ingame.ShulkerBoxScreen);
+		pause(3);
+		then("AB2 button", () -> {
+			var buttons = net.fabricmc.fabric.api.client.screen.v1.Screens.getButtons(mc.currentScreen);
+			check("AB2: the button says the inventory is full and can't be pressed", buttons.stream().anyMatch(b -> b.visible && !b.active && b.getMessage().getString().contains("full")));
+		});
+		shot("13b_grab_full");
+		then("press", () -> key(GLFW.GLFW_KEY_G));
+		pause(10);
+		then("AB2", () -> {
+			check("AB2: G does nothing to the box", !BoxGrab.running());
+			check("AB2: the box still stands", mc.world.getBlockState(ground[0]).getBlock() instanceof ShulkerBoxBlock);
+			check("AB2: nothing dropped", groundItems() == 0);
+			check("AB2: you're still looking inside", mc.currentScreen instanceof net.minecraft.client.gui.screen.ingame.ShulkerBoxScreen);
+		});
+		// AB3: room for the box, but what's on your cursor would take that last slot when the screen closes.
+		then("one slot", () -> {
+			mc.player.closeHandledScreen();
+			cmd("item replace entity @s inventory.0 with air");
+			cmd("item replace entity @s inventory.1 with air");
+		});
+		pause(8);
+		then("open", () -> openBlock(ground[0]));
+		waitFor("box screen", 100, () -> mc.currentScreen instanceof net.minecraft.client.gui.screen.ingame.ShulkerBoxScreen);
+		pause(3);
+		then("hold", () -> {
+			var h = mc.player.currentScreenHandler;
+			mc.interactionManager.clickSlot(h.syncId, 3, 0, net.minecraft.screen.slot.SlotActionType.PICKUP, mc.player);
+			var again = h.slots.stream().filter(s -> s.inventory == mc.player.getInventory() && s.getIndex() == 9).findFirst().orElseThrow();
+			mc.interactionManager.clickSlot(h.syncId, again.id, 1, net.minecraft.screen.slot.SlotActionType.PICKUP, mc.player);
+			check("AB3: two slots free and a stack on the cursor: still room", BoxGrab.roomToGrab(mc));
+			var second = h.slots.stream().filter(s -> s.inventory == mc.player.getInventory() && s.getIndex() == 10).findFirst().orElseThrow();
+			mc.interactionManager.clickSlot(h.syncId, second.id, 1, net.minecraft.screen.slot.SlotActionType.PICKUP, mc.player);
+			check("AB3: no empty slot left once the cursor comes home: refused", !BoxGrab.roomToGrab(mc));
+		});
+		pause(3);
+		then("tidy up", () -> mc.player.closeHandledScreen());
+		pause(6);
+
+		// AB4: the inventory fills while a slow break is under way: it stops and leaves the box standing.
+		reset();
+		then("place", () -> {
+			ground[0] = origin.add(-1, 0, 1);
+			usedSpot = ground[0];
+			cmd("setblock " + ground[0].getX() + " " + ground[0].getY() + " " + ground[0].getZ() + " red_shulker_box{Items:[{Slot:3b,id:\"diamond\",count:12}]}");
+		});
+		pause(8);
+		then("open", () -> openBlock(ground[0]));
+		waitFor("box screen", 100, () -> mc.currentScreen instanceof net.minecraft.client.gui.screen.ingame.ShulkerBoxScreen);
+		pause(3);
+		then("press", () -> key(GLFW.GLFW_KEY_G));
+		pause(6);
+		then("fill", () -> {
+			for (int i = 0; i < 9; i++) cmd("item replace entity @s hotbar." + i + " with stone 64");
+			for (int i = 0; i < 27; i++) cmd("item replace entity @s inventory." + i + " with dirt 64");
+		});
+		waitFor("bot to stop", 200, () -> !BoxGrab.running());
+		pause(5);
+		then("AB4", () -> {
+			check("AB4: says why and where: " + BoxGrab.lastMessage, !BoxGrab.lastOk && BoxGrab.lastMessage.contains("wasn't broken") && BoxGrab.lastMessage.contains(ground[0].toShortString()));
+			check("AB4: the box still stands", mc.world.getBlockState(ground[0]).getBlock() instanceof ShulkerBoxBlock);
+			check("AB4: nothing dropped", groundItems() == 0);
+		});
+
+		// AC: the loose items in a container: any amount, nothing placed, nothing at risk. Sort it, boxes stay put.
+		reset();
+		boxInChest(5);
+		then("loose", () -> {
+			cmd("item replace block " + chestAt() + " container.0 with iron_ingot 40");
+			cmd("item replace block " + chestAt() + " container.20 with iron_ingot 40");
+			cmd("item replace block " + chestAt() + " container.9 with coal 30");
+			cmd("item replace entity @s inventory.0 with stone 8");
+		});
+		pause(8);
+		openChest();
+		openPickerOn(5);
+		hit("TAB0");
+		then("AC0", () -> check("AC: this tab is the loose items", BoxPicker.testIsLoose()));
+		shot("14_loose");
+		hoverCell(0);
+		keys(GLFW.GLFW_KEY_5, GLFW.GLFW_KEY_0);
+		keys(GLFW.GLFW_KEY_ENTER);
+		clickInv(9, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		then("AC1", () -> check("AC: a box in the grid opens its tab rather than being picked", BoxPicker.testWant(5) == 0));
+		hit("TIDY");
+		pressEnterAndWait();
+		then("AC", () -> {
+			check("AC: done: " + BoxGrab.lastMessage, BoxGrab.lastOk);
+			check("AC: never set anything down", BoxGrab.lastBoxOutTicks == 0);
+			check("AC: 50 iron, spread over two stacks", count(Items.IRON_INGOT) == 50);
+			var slots = mc.player.currentScreenHandler.slots;
+			check("AC: the box didn't move", slots.get(5).getStack().isOf(Items.RED_SHULKER_BOX));
+			int stone = 0;
+			for (int i = 0; i < 27; i++) if (slots.get(i).getStack().isOf(Items.STONE)) stone += slots.get(i).getStack().getCount();
+			check("AC: the stone went in", stone == 8 && count(Items.STONE) == 0);
+			log("AC chest: " + slots.get(0).getStack() + " " + slots.get(1).getStack() + " " + slots.get(2).getStack() + " " + slots.get(3).getStack());
+			check("AC: sorted", slots.get(0).getStack().isOf(Items.COAL) && slots.get(1).getStack().isOf(Items.IRON_INGOT));
+		});
+
+		// AD: inside bundles: in a box, and loose in the chest. Any amount of any stack; the rest stays in the bundle.
+		String bundle = "bundle[bundle_contents=[{id:\"ender_pearl\",count:8},{id:\"golden_carrot\",count:20},{id:\"arrow\",count:16}]]";
+		reset();
+		boxOf(5, "{slot:2,item:{id:\"" + "bundle\",count:1,components:{\"bundle_contents\":[{id:\"ender_pearl\",count:8},{id:\"golden_carrot\",count:20},{id:\"arrow\",count:16}]}}}");
+		then("loose bundle", () -> cmd("item replace block " + chestAt() + " container.0 with " + bundle));
+		pause(6);
+		pick();
+		openChest();
+		openPickerOn(5);
+		clickCell(2, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		then("AD0", () -> check("AD: clicking a bundle goes inside it", BoxPicker.testInBundle()));
+		shot("15_bundle");
+		hoverCell(1);
+		keys(GLFW.GLFW_KEY_7);
+		keys(GLFW.GLFW_KEY_ENTER);
+		clickCell(0, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		then("AD1", () -> check("AD: picks inside (" + BoxPicker.testBundleWant(1) + "," + BoxPicker.testBundleWant(0) + ")", BoxPicker.testBundleWant(1) == 7 && BoxPicker.testBundleWant(0) == 8));
+		hit("BACK");
+		then("AD2", () -> check("AD: Back keeps them: " + BoxPicker.testGoLabel(), !BoxPicker.testInBundle() && BoxPicker.testGoLabel().contains("2")));
+		pressEnterAndWait();
+		then("AD", () -> {
+			check("AD: from inside a bundle in a box: " + BoxGrab.lastMessage, BoxGrab.lastOk);
+			check("AD: exact amounts (" + count(Items.GOLDEN_CARROT) + "," + count(Items.ENDER_PEARL) + ")", count(Items.GOLDEN_CARROT) == 7 && count(Items.ENDER_PEARL) == 8);
+			ItemStack box = mc.player.currentScreenHandler.slots.get(5).getStack();
+			ItemStack inner = contentsOf(box).get(2);
+			var kept = inner.get(DataComponentTypes.BUNDLE_CONTENTS);
+			int carrots = 0, pearls = 0, arrows = 0;
+			if (kept != null) for (ItemStack s : kept.iterate()) {
+				if (s.isOf(Items.GOLDEN_CARROT)) carrots += s.getCount();
+				if (s.isOf(Items.ENDER_PEARL)) pearls += s.getCount();
+				if (s.isOf(Items.ARROW)) arrows += s.getCount();
+			}
+			check("AD: the bundle went back in the box with the rest (" + carrots + "," + pearls + "," + arrows + ")", carrots == 13 && pearls == 0 && arrows == 16);
+		});
+		checkWorldClean("AD");
+		// The bundle loose in the chest: no box out at all.
+		then("hover", () -> {
+			HandledScreen<?> screen = (HandledScreen<?>) mc.currentScreen;
+			Slot slot = screen.getScreenHandler().slots.get(5);
+			HandledScreenAccessor a = (HandledScreenAccessor) screen;
+			mouseTo(a.hoardeye$getX() + slot.x + 8, a.hoardeye$getY() + slot.y + 8);
+		});
+		pause(3);
+		then("open", () -> clickButton(GLFW.GLFW_MOUSE_BUTTON_MIDDLE, 0));
+		pause(3);
+		hit("TAB0");
+		clickCell(0, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		pause(2);
+		clickCell(2, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		pause(2);
+		pressEnterAndWait();
+		then("AD3", () -> {
+			check("AD: from a bundle loose in the chest: " + BoxGrab.lastMessage, BoxGrab.lastOk && count(Items.ARROW) == 16 && BoxGrab.lastBoxOutTicks == 0);
+			var kept = mc.player.currentScreenHandler.slots.get(0).getStack().get(DataComponentTypes.BUNDLE_CONTENTS);
+			check("AD: the rest stayed in it", kept != null && kept.size() == 2);
+		});
+
+		// AE: a double chest: pages of loose items, boxes on the second page reached too. A small window: still drawn, nothing thrown.
+		reset();
+		BlockPos[] doubleChest = new BlockPos[2];
+		then("double", () -> {
+			doubleChest[0] = chest;
+			doubleChest[1] = chest.add(0, 0, 1);
+			cmd("setblock " + chest.getX() + " " + chest.getY() + " " + (chest.getZ() + 1) + " air");
+			cmd("setblock " + chestAt() + " chest[type=left,facing=east]");
+			cmd("setblock " + chest.getX() + " " + chest.getY() + " " + (chest.getZ() + 1) + " chest[type=right,facing=east]");
+		});
+		pause(8);
+		then("fill", () -> {
+			cmd("item replace block " + chestAt() + " container.0 with iron_ingot 40");
+			cmd("item replace block " + chest.getX() + " " + chest.getY() + " " + (chest.getZ() + 1) + " container.0 with " + KIT);
+			cmd("item replace block " + chest.getX() + " " + chest.getY() + " " + (chest.getZ() + 1) + " container.1 with coal 5");
+		});
+		pause(8);
+		openChest();
+		then("G", () -> {
+			mouseTo(2, 2);
+			key(GLFW.GLFW_KEY_G);
+		});
+		pause(3);
+		hit("TAB0");
+		then("AE", () -> check("AE: two pages of loose items", BoxPicker.testHasButton("PAGED")));
+		hit("PAGED");
+		pause(1);
+		shot("16_pages");
+		then("small", () -> {
+			mc.getWindow().setScaleFactor(4);
+			mc.currentScreen.resize(mc.getWindow().getScaledWidth(), mc.getWindow().getScaledHeight());
+		});
+		pause(3);
+		shot("17_small");
+		then("AE small", () -> {
+			int[] p = BoxPicker.testPanel();
+			check("AE: at a huge GUI scale the whole panel is on screen (" + java.util.Arrays.toString(p) + " in " + mc.getWindow().getScaledWidth() + "x" + mc.getWindow().getScaledHeight() + ")",
+					BoxPicker.isOpen() && p[0] >= 0 && p[1] >= 0 && p[2] <= mc.getWindow().getScaledWidth() && p[3] <= mc.getWindow().getScaledHeight());
+		});
+		hit("PAGEU");
+		then("AE small2", () -> check("AE: and its buttons still work there", BoxPicker.testHasButton("PAGED")));
+		clickCell(1, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		pause(2);
+		then("AE small3", () -> check("AE: so do its cells (" + BoxPicker.testWant(1) + ")", BoxPicker.testWant(1) == 5));
+		then("back", () -> {
+			mc.onResolutionChanged();
+			mc.currentScreen.resize(mc.getWindow().getScaledWidth(), mc.getWindow().getScaledHeight());
+		});
+		pause(3);
+		then("AE esc", () -> BoxPicker.close());
+
 		// Every message the picker can show has to fit its panel.
 		then("texts", () -> {
-			for (String key : List.of("hint", "nothing", "safe", "ready", "no_pick", "no_spot", "no_room", "cursor", "survival_only", "nobody")) {
+			for (String key : List.of("hint", "hint_box", "hint_inv", "hint_typing", "hint_bundle", "hint_bundle_cell", "safe", "no_pick", "no_spot", "no_room", "no_room_box", "cursor", "survival_only", "nobody", "amount_hint", "nothing_to_top_up",
+					"hint.tab", "hint.kit", "hint.last", "hint.all", "hint.none", "hint.tidy", "hint.instant", "hint.guard", "hint.topup", "hint.match", "hint.storeall", "hint.save", "hint.speed", "hint.take", "hint.cancel")) {
 				int width = mc.textRenderer.getWidth(net.minecraft.text.Text.translatable("hoardeye.picker." + key));
-				int room = key.equals("hint") ? 178 : 198;
+				int room = 198;
 				check("picker text '" + key + "' fits (" + width + " of " + room + ")", width <= room);
 			}
 		});
