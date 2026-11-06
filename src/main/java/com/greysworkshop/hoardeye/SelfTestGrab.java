@@ -63,6 +63,9 @@ public final class SelfTestGrab {
 
 	private static final Deque<Step> steps = new ArrayDeque<>();
 	private static final int[] dirtSlot = new int[2];
+	/** Self-test: a server as fussy as a real one about opening an ender chest. */
+	private static volatile boolean strictEnder;
+	private static volatile int refuseNext, refusedHolding, refusedAim, refusedCount, openedStrict;
 	private static boolean started, stopping;
 	private static int waited, passed, failed, sleep;
 	private static BlockPos origin, chest;
@@ -235,6 +238,13 @@ public final class SelfTestGrab {
 			check(name + ": the box is back in the ender chest", box.isOf(Items.RED_SHULKER_BOX));
 			check(name + ": clicked from within a player's reach (" + BoxGrab.lastReopenDistance + ")", BoxGrab.lastReopenDistance <= 4.5);
 		});
+		shot("ender_" + name);
+	}
+
+	/** Where these angles point: the server's own getRotationVec goes by the head, which it only updates on its tick. */
+	private static Vec3d lookOf(float yaw, float pitch) {
+		double y = Math.toRadians(yaw), x = Math.toRadians(pitch);
+		return new Vec3d(-Math.sin(y) * Math.cos(x), -Math.sin(x), Math.cos(y) * Math.cos(x));
 	}
 
 	/** Press here, move there a frame or two, let go: through the game's real mouse handler. */
@@ -1809,6 +1819,72 @@ public final class SelfTestGrab {
 			check("AL: nothing else in the ender chest moved", mc.player.currentScreenHandler.slots.get(4).getStack().isOf(Items.DIRT));
 		});
 		checkWorldClean("AL");
+
+		// AO: a fussy server, as a real one can be. No opening with a shulker in hand, none unless you're really looking at it,
+		// and the first tries refused. It still has to get back in, promptly, by clicking the way a person does.
+		if (!remote) {
+			then("AO watch", () -> net.fabricmc.fabric.api.event.player.UseBlockCallback.EVENT.register((player, world, hand, hit) -> {
+				if (world.isClient() || !strictEnder || !world.getBlockState(hit.getBlockPos()).isOf(net.minecraft.block.Blocks.ENDER_CHEST)) return net.minecraft.util.ActionResult.PASS;
+				if (BoxGrab.isBox(player.getMainHandStack())) {
+					refusedHolding++;
+					return net.minecraft.util.ActionResult.FAIL;
+				}
+				Vec3d eye = player.getEyePos();
+				BlockHitResult ray = world.raycast(new net.minecraft.world.RaycastContext(eye, eye.add(lookOf(player.getYaw(), player.getPitch()).multiply(5)),
+						net.minecraft.world.RaycastContext.ShapeType.OUTLINE, net.minecraft.world.RaycastContext.FluidHandling.NONE, player));
+				if (ray.getType() != net.minecraft.util.hit.HitResult.Type.BLOCK || !ray.getBlockPos().equals(hit.getBlockPos()) || ray.getSide() != hit.getSide()) {
+					refusedAim++;
+					log("AO refused aim: client said " + hit.getBlockPos() + " " + hit.getSide() + ", server sees " + ray.getBlockPos() + " " + ray.getSide() + " " + ray.getType() + ", server angles " + player.getYaw() + " " + player.getPitch() + ", eye " + eye);
+					return net.minecraft.util.ActionResult.FAIL;
+				}
+				if (refuseNext > 0) {
+					refuseNext--;
+					refusedCount++;
+					return net.minecraft.util.ActionResult.FAIL;
+				}
+				openedStrict++;
+				return net.minecraft.util.ActionResult.PASS;
+			}));
+			reset();
+			BlockPos[] fussy = new BlockPos[1];
+			then("AO set", () -> {
+				fussy[0] = origin.add(0, 0, 3);
+				cmd("setblock " + fussy[0].getX() + " " + fussy[0].getY() + " " + fussy[0].getZ() + " ender_chest");
+				cmd("item replace entity @s enderchest.3 with " + KIT);
+			});
+			enderRun("AO", fussy, () -> {
+				strictEnder = true;
+				refuseNext = 2;
+				refusedHolding = refusedAim = refusedCount = openedStrict = 0;
+			});
+			then("AO2", () -> {
+				strictEnder = false;
+				check("AO: never clicked holding the shulker (" + refusedHolding + ")", refusedHolding == 0);
+				check("AO: always really looking at it (" + refusedAim + ")", refusedAim == 0);
+				check("AO: kept going through refusals (" + refusedCount + " refused, " + openedStrict + " opened)", refusedCount == 2 && openedStrict == 1);
+				check("AO: by the game's own key press", BoxGrab.lastReopenByKey);
+				check("AO: promptly (box back " + BoxGrab.lastBoxOutTicks + " ticks after leaving, " + BoxGrab.lastGroundTicks + " on the ground)", BoxGrab.lastBoxOutTicks - BoxGrab.lastGroundTicks < 120);
+			});
+		}
+
+		// AP: ender chest at every speed, with a pickaxe as you'd really have it: right, and back in promptly each time.
+		for (int speed : new int[]{100, 200, 500}) {
+			reset();
+			BlockPos[] apChest = new BlockPos[1];
+			then("AP set " + speed, () -> {
+				apChest[0] = origin.add(0, 0, 2);
+				ModConfig.INSTANCE.boxPickerSpeed = speed;
+				cmd("setblock " + apChest[0].getX() + " " + apChest[0].getY() + " " + apChest[0].getZ() + " ender_chest");
+				cmd("item replace entity @s enderchest.3 with " + KIT);
+				cmd("item replace entity @s hotbar.8 with netherite_pickaxe[enchantments={efficiency:5}]");
+			});
+			enderRun("AP" + speed, apChest, null);
+			then("AP done " + speed, () -> {
+				int inHand = BoxGrab.lastBoxOutTicks - BoxGrab.lastGroundTicks;
+				check("AP" + speed + ": back in the ender chest within 2s of having the box (" + inHand + " ticks)", inHand <= 40);
+				ModConfig.INSTANCE.boxPickerSpeed = 200;
+			});
+		}
 
 		// AF: a screen no block opened isn't the chest you used last. The box must not go into that chest afterwards.
 		reset();

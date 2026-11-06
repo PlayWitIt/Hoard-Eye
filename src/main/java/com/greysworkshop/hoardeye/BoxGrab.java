@@ -166,6 +166,8 @@ public final class BoxGrab {
 	/** How the container was last clicked to reopen it, for the self-test. */
 	static double lastReopenDistance;
 	static BlockHitResult lastReopenAim;
+	static boolean lastReopenByKey;
+	private static BlockHitResult reopenAim;
 	private static final long USE_ANSWER_MS = 10_000;
 
 	private BoxGrab() {}
@@ -676,6 +678,7 @@ public final class BoxGrab {
 		savedSelected = inv.getSelectedSlot();
 		standAt = p.getEntityPos();
 		reopenTries = 0;
+		reopenAim = null;
 		boxItem = r.box().getItem();
 		boxName = r.box().get(DataComponentTypes.CUSTOM_NAME);
 		swaps.clear();
@@ -1665,23 +1668,59 @@ public final class BoxGrab {
 		}
 		walk(client, false);
 		if (p.isSneaking()) return;
-		// Once, then a retry when an answer is overdue: a second click while the first is on its way opens the chest again,
-		// and the server would throw away everything sent to the first one. Each retry clicks somewhere else on it.
-		if ((!clicked && ready()) || (clicked && ticks - reopenClickTick >= 30 + 2 * latencyTicks(client, p))) {
+		// A click is two ticks, as it is by hand: turn, so the server has seen where you're looking, then press the key.
+		if (reopenAim != null) {
+			clickContainer(client, p, world, container);
+			return;
+		}
+		// Once, then again when an answer is overdue: a second click while the first is on its way opens the chest again,
+		// and the server would throw away everything sent to the first one. Each retry looks at somewhere else on it.
+		if ((!clicked && ready()) || (clicked && ticks - reopenClickTick >= 12 + 2 * latencyTicks(client, p))) {
 			clicked = true;
 			reopenClickTick = ticks;
 			acted();
-			BlockHitResult aim = aimAt(p, world, container, reopenTries++);
-			lastReopenAim = aim;
-			lastReopenDistance = p.getEyePos().distanceTo(aim.getPos());
-			look(p, aim.getPos());
+			// You opened it with this in your hand, not with the box you've just picked up.
+			p.getInventory().setSelectedSlot(handForClicking(p.getInventory()));
+			reopenAim = aimAt(p, world, container, reopenTries);
+			Vec3d d = reopenAim.getPos().subtract(p.getEyePos());
+			p.setYaw((float) (MathHelper.atan2(d.z, d.x) * 180 / Math.PI) - 90);
+			p.setPitch((float) -(MathHelper.atan2(d.y, Math.sqrt(d.x * d.x + d.z * d.z)) * 180 / Math.PI));
+		}
+	}
+
+	private static void clickContainer(MinecraftClient client, ClientPlayerEntity p, ClientWorld world, BlockPos container) {
+		BlockHitResult aim = reopenAim;
+		reopenAim = null;
+		reopenTries++;
+		lastReopenAim = aim;
+		lastReopenDistance = p.getEyePos().distanceTo(aim.getPos());
+		client.gameRenderer.updateCrosshairTarget(1f);
+		boolean inSight = client.crosshairTarget instanceof BlockHitResult seen && seen.getType() == HitResult.Type.BLOCK && seen.getBlockPos().equals(container);
+		lastReopenByKey = inSight;
+		HoardEyeClient.LOGGER.info("Box picker: reopening {}, try {}, {}m away, holding {}, {}, looking {} {}, step tick {}", container.toShortString(), reopenTries,
+				String.format(java.util.Locale.ROOT, "%.1f", lastReopenDistance), p.getMainHandStack().getItem(), inSight ? "crosshair on it" : "not in sight, clicking anyway",
+				String.format(java.util.Locale.ROOT, "%.1f", p.getYaw()), String.format(java.util.Locale.ROOT, "%.1f", p.getPitch()), ticks);
+		if (inSight) {
+			// The key does nothing at all while the game thinks a block is still being broken.
+			if (client.interactionManager.isBreakingBlock()) client.interactionManager.cancelBlockBreaking();
+			((com.greysworkshop.hoardeye.mixin.MinecraftClientInvoker) client).hoardeye$doItemUse();
+		} else {
+			// A server hiding it, say: it did open for you, so try the place you clicked.
 			client.interactionManager.interactBlock(p, Hand.MAIN_HAND, aim);
 			p.swingHand(Hand.MAIN_HAND);
-			if (burstRun && !walking) {
-				p.setYaw(savedYaw);
-				p.setPitch(savedPitch);
-			}
 		}
+		if (burstRun && !walking) {
+			p.setYaw(savedYaw);
+			p.setPitch(savedPitch);
+		}
+	}
+
+	/** An empty hand if there is one, as nothing can get in the way of opening; failing that anything that isn't a block. */
+	private static int handForClicking(PlayerInventory inv) {
+		for (int i = 0; i < 9; i++) if (inv.getStack(i).isEmpty()) return i;
+		if (!(inv.getStack(savedSelected).getItem() instanceof net.minecraft.item.BlockItem)) return savedSelected;
+		for (int i = 0; i < 9; i++) if (!(inv.getStack(i).getItem() instanceof net.minecraft.item.BlockItem)) return i;
+		return savedSelected;
 	}
 
 	/**
@@ -1692,12 +1731,12 @@ public final class BoxGrab {
 		Vec3d eye = p.getEyePos();
 		BlockHitResult own = openedFrom != null && openedFrom.getBlockPos().equals(pos) ? openedFrom : null;
 		List<BlockHitResult> found = new ArrayList<>();
-		if (own != null && eye.distanceTo(own.getPos()) <= REACH) found.add(own);
 		var shape = world.getBlockState(pos).getOutlineShape(world, pos);
 		if (!shape.isEmpty()) {
 			Box box = shape.getBoundingBox().offset(pos);
 			Vec3d c = box.getCenter();
-			double dx = box.getLengthX() * 0.4, dy = box.getLengthY() * 0.4, dz = box.getLengthZ() * 0.4;
+			// Well inside the edges, so a rounded angle can't land on a different face than the one meant.
+			double dx = box.getLengthX() * 0.2, dy = box.getLengthY() * 0.2, dz = box.getLengthZ() * 0.2;
 			Vec3d[] points = {c, c.add(0, dy, 0), c.add(0, -dy, 0), c.add(dx, 0, 0), c.add(-dx, 0, 0), c.add(0, 0, dz), c.add(0, 0, -dz)};
 			for (Vec3d point : points) {
 				// A little past it, so the ray reaches the block's surface.
@@ -1706,6 +1745,7 @@ public final class BoxGrab {
 				if (ray.getType() == HitResult.Type.BLOCK && ray.getBlockPos().equals(pos) && eye.distanceTo(ray.getPos()) <= REACH) found.add(ray);
 			}
 		}
+		if (own != null && eye.distanceTo(own.getPos()) <= REACH) found.add(own);
 		if (!found.isEmpty()) return found.get(attempt % found.size());
 		// Nothing in view that we know of. It did open for you, so try anyway.
 		if (own != null) return own;

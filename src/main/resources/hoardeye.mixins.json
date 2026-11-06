@@ -11,6 +11,7 @@
 		"InteractionManagerMixin",
 		"ItemStackMixin",
 		"KeyboardMixin",
+		"MinecraftClientInvoker",
 		"MouseMixin"
 	],
 	"injectors": {
