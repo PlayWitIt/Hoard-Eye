@@ -167,6 +167,7 @@ public final class SelfTestGrab {
 	/** A clean floor, a chest to the side, an empty player in Survival. */
 	private static void reset() {
 		then("close", () -> {
+			BoxGrab.testKeepOpen = true;
 			BoxPicker.close();
 			if (mc.player.currentScreenHandler != mc.player.playerScreenHandler || mc.currentScreen != null) mc.player.closeHandledScreen();
 			mc.player.getInventory().setSelectedSlot(0);
@@ -346,6 +347,10 @@ public final class SelfTestGrab {
 		hoverSlot(slotId);
 		then("middle-click", () -> clickButton(GLFW.GLFW_MOUSE_BUTTON_MIDDLE, 0));
 		waitFor("picker open", 20, BoxPicker::isOpen);
+		then("why not", () -> {
+			if (!BoxPicker.isOpen()) log("picker shut: screen " + mc.currentScreen + ", cursor " + mc.player.currentScreenHandler.getCursorStack() + ", slot "
+					+ (slotId < mc.player.currentScreenHandler.slots.size() ? mc.player.currentScreenHandler.slots.get(slotId).getStack() : null) + ", running " + BoxGrab.running());
+		});
 		pause(2);
 	}
 
@@ -1885,6 +1890,83 @@ public final class SelfTestGrab {
 				ModConfig.INSTANCE.boxPickerSpeed = 200;
 			});
 		}
+
+		// AQ: it shuts the chest when it's done, and the box really is in there when you open it again.
+		for (boolean inEnder : new boolean[]{true, false}) {
+			String aq = "AQ " + (inEnder ? "ender chest" : "chest");
+			reset();
+			BlockPos[] at = new BlockPos[1];
+			if (inEnder) {
+				then(aq + " set", () -> {
+					at[0] = origin.add(0, 0, 2);
+					cmd("setblock " + at[0].getX() + " " + at[0].getY() + " " + at[0].getZ() + " ender_chest");
+					cmd("item replace entity @s enderchest.3 with " + KIT);
+				});
+				pause(10);
+				then(aq + " open", () -> openBlockInView(at[0]));
+				waitFor(aq + " screen", 100, () -> mc.currentScreen instanceof GenericContainerScreen && mc.player.currentScreenHandler.getRevision() != 0);
+				pause(3);
+			} else {
+				then(aq + " set", () -> at[0] = chest);
+				boxInChest(3);
+				openChest();
+			}
+			then(aq + " real end", () -> {
+				BoxGrab.testKeepOpen = false;
+				cmd("item replace entity @s hotbar.8 with netherite_pickaxe[enchantments={efficiency:5}]");
+			});
+			pause(3);
+			openPickerOn(3);
+			hit("ALL");
+			pressEnterAndWait();
+			shot("closed_" + (inEnder ? "ender" : "chest"));
+			then(aq + " closed", () -> {
+				BoxGrab.testKeepOpen = true;
+				check(aq + ": worked: " + BoxGrab.lastMessage, BoxGrab.lastOk);
+				check(aq + ": no screen left open (" + mc.currentScreen + ")", mc.currentScreen == null);
+				check(aq + ": the client has left it", mc.player.currentScreenHandler == mc.player.playerScreenHandler);
+				check(aq + ": the items are on you", count(Items.ENDER_PEARL) == 16);
+				if (!remote) {
+					var uuid = mc.player.getUuid();
+					mc.getServer().execute(() -> {
+						var sp = mc.getServer().getPlayerManager().getPlayer(uuid);
+						check(aq + ": the server has left it too", sp.currentScreenHandler == sp.playerScreenHandler);
+					});
+				}
+				log(aq + ": took " + BoxGrab.lastTicks + " ticks, box out " + BoxGrab.lastBoxOutTicks + ", on the ground " + BoxGrab.lastGroundTicks);
+			});
+			pause(5);
+			then(aq + " look again", () -> openBlockInView(at[0]));
+			waitFor(aq + " screen again", 100, () -> mc.currentScreen instanceof GenericContainerScreen && mc.player.currentScreenHandler.getRevision() != 0);
+			then(aq + " box", () -> {
+				check(aq + ": the box is in its slot", mc.player.currentScreenHandler.slots.get(3).getStack().isOf(Items.RED_SHULKER_BOX));
+				mc.player.closeHandledScreen();
+			});
+			pause(5);
+			then(aq + " tidy", () -> {
+				if (inEnder) cmd("setblock " + at[0].getX() + " " + at[0].getY() + " " + at[0].getZ() + " air");
+				cmd("item replace entity @s enderchest.3 with air");
+			});
+			pause(3);
+		}
+
+		// AR: when it couldn't do the job it leaves the chest open for you.
+		reset();
+		boxInChest(3);
+		openChest();
+		then("AR real end", () -> {
+			BoxGrab.testKeepOpen = false;
+			BoxGrab.testFailPlaces = 99;
+		});
+		openPickerOn(3);
+		hit("ALL");
+		pressEnterAndWait();
+		then("AR", () -> {
+			BoxGrab.testKeepOpen = true;
+			BoxGrab.testFailPlaces = 0;
+			check("AR: it says it couldn't: " + BoxGrab.lastMessage, !BoxGrab.lastOk);
+			check("AR: the chest stays open (" + mc.currentScreen + ")", mc.currentScreen instanceof GenericContainerScreen);
+		});
 
 		// AF: a screen no block opened isn't the chest you used last. The box must not go into that chest afterwards.
 		reset();

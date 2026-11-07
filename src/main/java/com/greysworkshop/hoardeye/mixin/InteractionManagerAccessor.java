@@ -8,4 +8,10 @@ import org.spongepowered.asm.mixin.gen.Accessor;
 public interface InteractionManagerAccessor {
 	@Accessor("blockBreakingCooldown")
 	void hoardeye$setBreakCooldown(int ticks);
+
+	@Accessor("currentBreakingProgress")
+	float hoardeye$getBreakingProgress();
+
+	@Accessor("currentBreakingProgress")
+	void hoardeye$setBreakingProgress(float progress);
 }

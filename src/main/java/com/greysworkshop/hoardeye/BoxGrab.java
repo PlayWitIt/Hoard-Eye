@@ -93,8 +93,8 @@ public final class BoxGrab {
 	private static final double REACH = 4.4;
 	/** Most clicks sent in one tick, so a big pick can't trip a server's packet limit. */
 	private static final int CLICK_BUDGET = 40;
-	/** The fastest a very good player does one inventory action or block click: about 150 ms. An estimate, not a measurement. */
-	private static final double HUMAN_ACTION_TICKS = 3;
+	/** A fast player clicks about ten times a second, so one action is 100 ms. At the default 2x the bot does one a tick. */
+	private static final double HUMAN_ACTION_TICKS = 2;
 	private static final int MAX_TAKE_TRIES = 4;
 	private static final int OPEN_RETRY = 100, OPEN_TIMEOUT = 200, COLLECT_TIMEOUT = 200, REOPEN_TIMEOUT = 400;
 
@@ -125,6 +125,9 @@ public final class BoxGrab {
 	private static int[] left;
 	private static boolean closedChest;
 	private static int takeTries, inventorySyncs, syncAsked;
+	private static final StringBuilder timing = new StringBuilder();
+	/** Self-test: leave the container open at the end, so its contents can be read. */
+	static boolean testKeepOpen;
 	/** Self-test: pretend the server lost the clicks for this many passes over the box. */
 	static int testLoseClicks;
 	static int lastTakeTries;
@@ -663,7 +666,7 @@ public final class BoxGrab {
 				total += pace * actions + ping * 2 + 2;
 				continue;
 			}
-			total += pace * (actions + 7) + breakTicks(p.getInventory()) + 16 + ping * 5;
+			total += pace * (actions + 7) + breakTicks(p.getInventory()) + 13 + ping * 5;
 		}
 		return total;
 	}
@@ -805,9 +808,15 @@ public final class BoxGrab {
 	}
 
 	private static void go(Step next) {
+		noteTime();
 		step = next;
 		ticks = 0;
 		clicked = false;
+	}
+
+	/** How long each step took, for the log: when a run feels slow this says where the time went. */
+	private static void noteTime() {
+		if (step != Step.IDLE) timing.append(step).append(' ').append(ticks).append(", ");
 	}
 
 	public static void onDisconnect() {
@@ -986,7 +995,7 @@ public final class BoxGrab {
 			// One stack per action, unless everything is meant to go at once.
 			if (!burstRun) {
 				acted();
-				return;
+				if (!ready()) return;
 			}
 		}
 		if (lose) {
@@ -1544,6 +1553,13 @@ public final class BoxGrab {
 				p.setPitch(savedPitch);
 			}
 		} else {
+			// A tool's enchantments only reach your stats a moment after it's in hand, and a break this short would be over
+			// by then. Count what the tool can really do; the server goes by the same tool, and finishes it itself if it disagrees.
+			float now = state.calcBlockBreakingDelta(p, world, spot), real = breakSpeed(p.getMainHandStack()) / 60f;
+			if (real > now && p.isOnGround() && !p.isSubmergedInWater()) {
+				var manager = (com.greysworkshop.hoardeye.mixin.InteractionManagerAccessor) client.interactionManager;
+				manager.hoardeye$setBreakingProgress(manager.hoardeye$getBreakingProgress() + real - now);
+			}
 			client.interactionManager.updateBlockBreakingProgress(spot, side);
 		}
 		p.swingHand(Hand.MAIN_HAND);
@@ -1786,7 +1802,9 @@ public final class BoxGrab {
 			}
 		}
 		// No chest to reopen, which would have corrected everything guessed in a burst.
-		if (burstRun && request.container() == null) resync(p);
+		// Any other time it's how we know, as soon as the server does, that the box went in.
+		syncAsked = inventorySyncs;
+		resync(p);
 		inv.setSelectedSlot(savedSelected);
 		// The clicks above are only the client's guess until the server answers, so nothing is claimed yet.
 		claimedBack = returned;
@@ -1808,7 +1826,7 @@ public final class BoxGrab {
 
 	/** The server has had time to answer: now say what really happened. */
 	private static void settle(MinecraftClient client, ClientPlayerEntity p) {
-		if (ticks < settleTicks) return;
+		if (inventorySyncs == syncAsked && ticks < settleTicks) return;
 		PlayerInventory inv = p.getInventory();
 		boolean returned;
 		if (request.sourceIsInventory()) {
@@ -1831,6 +1849,7 @@ public final class BoxGrab {
 		}
 		if (returned) boxesBack++;
 		int outFor = boxOutTick < 0 ? 0 : boxBackTick - boxOutTick;
+		noteTime();
 		stop(client);
 		lastBoxOutTicks = outFor;
 		lastTicks = boxBackTick;
@@ -1869,6 +1888,9 @@ public final class BoxGrab {
 			grabbing = false;
 		}
 		parts.removeIf(String::isEmpty);
+		// The job's done, so the chest shuts, as you'd shut it. If something went wrong or you stopped it, it's left open for you.
+		ClientPlayerEntity p = client.player;
+		if (p != null && !queueFailed && notes.isEmpty() && !stopRequested && !testKeepOpen && p.currentScreenHandler != p.playerScreenHandler) p.closeHandledScreen();
 		report(client, !queueFailed, String.join(" ", parts));
 	}
 
@@ -1977,6 +1999,8 @@ public final class BoxGrab {
 		runTotal = 0;
 		lastMessage = notes.isEmpty() ? message : message + " " + String.join(" ", notes);
 		HoardEyeClient.LOGGER.info("Box picker: {} ({} ticks, box out {} ticks, on the ground {} ticks, {})", lastMessage, lastTicks, lastBoxOutTicks, lastGroundTicks, burstRun ? "burst" : "step by step");
+		HoardEyeClient.LOGGER.info("Box picker timing, in ticks: {}", timing);
+		timing.setLength(0);
 		if (client.player == null) return;
 		if (clean) client.player.sendMessage(Text.literal(lastMessage).formatted(Formatting.GREEN), true);
 		else client.player.sendMessage(Text.empty().append(Text.literal("[Hoard Eye] ").formatted(Formatting.GOLD))
