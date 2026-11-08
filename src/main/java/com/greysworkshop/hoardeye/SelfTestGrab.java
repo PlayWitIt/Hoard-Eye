@@ -798,6 +798,33 @@ public final class SelfTestGrab {
 		});
 		shot("6_no_spot");
 
+		// F2: surrounded by slabs. Their tops are half a block down, and a box sits on them as well as on anything.
+		reset();
+		boxInChest(5);
+		then("slabs", () -> {
+			int x = origin.getX(), y = origin.getY(), z = origin.getZ();
+			cmd("fill " + (x - 2) + " " + y + " " + (z - 2) + " " + (x + 2) + " " + y + " " + (z + 2) + " smooth_stone_slab[type=bottom] replace air");
+			cmd("setblock " + x + " " + y + " " + z + " air");
+			cmd("item replace entity @s hotbar.0 with netherite_pickaxe[enchantments={efficiency:5}]");
+		});
+		pause(15);
+		openChest();
+		then("F2 spots", () -> {
+			List<BlockPos> spots = BoxGrab.spots(mc.player, mc.world);
+			log("F2 spots: " + spots);
+			check("F2: room on top of the slabs (" + spots.size() + " spots)", !spots.isEmpty()
+					&& mc.world.getBlockState(spots.get(0).down()).isOf(net.minecraft.block.Blocks.SMOOTH_STONE_SLAB));
+		});
+		openPickerOn(5);
+		clickCell(0, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		pause(1);
+		pressEnterAndWait();
+		then("F2 results", () -> {
+			check("F2: worked on the slabs: " + BoxGrab.lastMessage, BoxGrab.lastOk && count(Items.TOTEM_OF_UNDYING) == 1);
+			check("F2: box back in the chest", mc.player.currentScreenHandler.slots.get(5).getStack().isOf(Items.RED_SHULKER_BOX));
+		});
+		checkWorldClean("F2");
+
 		// G: the box is taken from the chest while the picker is open.
 		reset();
 		boxInChest(5);
@@ -1618,7 +1645,9 @@ public final class SelfTestGrab {
 			cmd("setblock " + far[0].getX() + " " + far[0].getY() + " " + far[0].getZ() + " ender_chest");
 			cmd("item replace entity @s enderchest.3 with " + KIT);
 			int x = origin.getX(), y = origin.getY(), z = origin.getZ();
-			cmd("fill " + (x - 2) + " " + y + " " + (z - 2) + " " + (x + 1) + " " + y + " " + (z + 2) + " white_carpet");
+			// Tripwire: nothing to set a box on, in it or on top, and low enough to see the chest over. (Carpet won't do: a box sits on carpet like on a slab.)
+			cmd("fill " + (x - 2) + " " + y + " " + (z - 2) + " " + (x + 1) + " " + y + " " + (z + 2) + " tripwire");
+			cmd("setblock " + x + " " + y + " " + z + " air");
 		});
 		enderRun("AI", far, null);
 		then("AI2", () -> check("AI: the box had to go away from the chest (" + String.valueOf(BoxGrab.spot()) + ")", BoxGrab.spot() != null && BoxGrab.spot().getX() == origin.getX() + 2));

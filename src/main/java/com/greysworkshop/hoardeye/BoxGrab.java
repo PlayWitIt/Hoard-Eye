@@ -273,6 +273,13 @@ public final class BoxGrab {
 		return list;
 	}
 
+	/** The middle of the floor block's top, where a person would click to set a box on it: half way down on a bottom slab. */
+	private static Vec3d floorHit(ClientWorld world, BlockPos below) {
+		var shape = world.getBlockState(below).getOutlineShape(world, below);
+		double top = shape.isEmpty() ? 1 : Math.min(1, shape.getMax(Direction.Axis.Y));
+		return new Vec3d(below.getX() + 0.5, below.getY() + top, below.getZ() + 0.5);
+	}
+
 	private static boolean canHoldBox(ClientPlayerEntity p, ClientWorld world, BlockPos cell) {
 		BlockState here = world.getBlockState(cell), above = world.getBlockState(cell.up());
 		// It opens upward, so the cell above must be clear too.
@@ -280,7 +287,8 @@ public final class BoxGrab {
 		if (!world.getWorldBorder().contains(cell)) return false;
 		BlockPos below = cell.down();
 		BlockState floor = world.getBlockState(below);
-		if (!floor.isSideSolidFullSquare(world, below, Direction.UP)) return false;
+		// Anything with a top to click: a slab, a path, farmland or a full block. Not something placing would replace instead.
+		if (floor.isReplaceable() || floor.getOutlineShape(world, below).isEmpty() || floor.getCollisionShape(world, below).isEmpty()) return false;
 		// Clicking these would use them instead of placing against them; on a chest it'd also block the lid.
 		if (floor.hasBlockEntity() || floor.createScreenHandlerFactory(world, below) != null || floor.isIn(BlockTags.TRAPDOORS)
 				|| floor.isIn(BlockTags.DOORS) || floor.isIn(BlockTags.BUTTONS) || floor.isOf(Blocks.NOTE_BLOCK) || floor.isOf(Blocks.TNT)) return false;
@@ -291,7 +299,7 @@ public final class BoxGrab {
 			FluidState fluid = side.getFluidState();
 			if (fluid.isIn(FluidTags.LAVA) || !fluid.isEmpty() || side.isIn(BlockTags.FIRE) || side.isOf(Blocks.CACTUS)) return false;
 		}
-		Vec3d hit = Vec3d.ofCenter(below).add(0, 0.5, 0), eye = p.getEyePos();
+		Vec3d hit = floorHit(world, below), eye = p.getEyePos();
 		if (eye.distanceTo(hit) > REACH) return false;
 		BlockHitResult ray = world.raycast(new RaycastContext(eye, hit.add(0, -0.01, 0), RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, p));
 		return ray.getType() == HitResult.Type.MISS || ray.getBlockPos().equals(below);
@@ -763,7 +771,7 @@ public final class BoxGrab {
 		spot = options.get(0);
 		triedSpots.add(spot);
 		BlockPos below = spot.down();
-		Vec3d floor = Vec3d.ofCenter(below).add(0, 0.5, 0);
+		Vec3d floor = floorHit(client.world, below);
 		look(p, floor);
 		client.interactionManager.interactBlock(p, Hand.MAIN_HAND, new BlockHitResult(floor, Direction.UP, below, false));
 		p.swingHand(Hand.MAIN_HAND);
@@ -816,8 +824,13 @@ public final class BoxGrab {
 
 	/** How long each step took, for the log: when a run feels slow this says where the time went. */
 	private static void noteTime() {
-		if (step != Step.IDLE) timing.append(step).append(' ').append(ticks).append(", ");
+		long now = System.nanoTime();
+		// Real time too: a step that took far longer than its ticks means the game itself stalled, not the bot waiting.
+		if (step != Step.IDLE) timing.append(step).append(' ').append(ticks).append(" (").append((now - stepStartNanos) / 1_000_000).append("ms), ");
+		stepStartNanos = now;
 	}
+
+	private static long stepStartNanos;
 
 	public static void onDisconnect() {
 		breaking = false;
@@ -920,7 +933,7 @@ public final class BoxGrab {
 		}
 		inv.setSelectedSlot(hotbar);
 		BlockPos below = spot.down();
-		Vec3d hit = Vec3d.ofCenter(below).add(0, 0.5, 0);
+		Vec3d hit = floorHit(world, below);
 		look(p, hit);
 		client.interactionManager.interactBlock(p, Hand.MAIN_HAND, new BlockHitResult(hit, Direction.UP, below, false));
 		p.swingHand(Hand.MAIN_HAND);
