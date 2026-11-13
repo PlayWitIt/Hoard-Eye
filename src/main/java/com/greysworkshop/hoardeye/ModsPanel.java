@@ -17,13 +17,15 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gl.RenderPipelines;
 import net.minecraft.client.gui.Click;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.font.TextRenderer;
+import net.minecraft.client.gui.screen.narration.NarrationMessageBuilder;
+import net.minecraft.client.gui.widget.ClickableWidget;
 import net.minecraft.client.gui.screen.GameMenuScreen;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.TitleScreen;
 import net.minecraft.client.gui.screen.multiplayer.MultiplayerScreen;
 import net.minecraft.client.gui.screen.world.SelectWorldScreen;
 import net.minecraft.client.gui.tooltip.Tooltip;
-import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.client.input.KeyInput;
 import net.minecraft.client.network.ServerInfo;
@@ -70,7 +72,7 @@ import java.util.function.Function;
  */
 public final class ModsPanel extends Screen {
 	/** Raised when the panel changes, so the newest copy among the installed mods is the one that draws it. */
-	private static final int VERSION = 4;
+	private static final int VERSION = 5;
 	private static final String MODS = "playwit:mods_panel_entries";
 	private static final String OWNER = "playwit:mods_panel_owner";
 	private static final String STREAM_SAFE = "playwit:stream_safe";
@@ -255,9 +257,7 @@ public final class ModsPanel extends Screen {
 			// thing beside Mod Menu's mod list — switches, profiles, backups, offline — not a duplicate. Right Shift opens
 			// it too, and each mod's settings link to it.
 			if (screen instanceof TitleScreen) {
-				Screens.getButtons(screen).add(ButtonWidget.builder(Text.literal(NAME), b -> client.setScreen(new ModsPanel(screen)))
-						.dimensions(4, 4, 80, 20).tooltip(Tooltip.of(Text.literal(TIP)))
-						.build());
+				Screens.getButtons(screen).add(new HubButton(4, 4, () -> client.setScreen(new ModsPanel(screen))));
 			}
 			ScreenKeyboardEvents.allowKeyPress(screen).register((s, key) -> {
 				// Not while typing (Right Shift makes capitals in the world search box).
@@ -1240,5 +1240,115 @@ public final class ModsPanel extends Screen {
 	@Override
 	public boolean shouldPause() {
 		return parent instanceof GameMenuScreen;
+	}
+
+	/**
+	 * The PlayWit Hub button at the top left of the title screen: a dark rounded pill with the hub's gold badge (a grid
+	 * of switches, one lit), its name in bold and a Right Shift key hint, lighting up gold when pointed at. Other things
+	 * that sit at the top left (the account chip) line up under it.
+	 */
+	public static final class HubButton extends ClickableWidget {
+		public static final int HEIGHT = 20;
+		private static final int BADGE = 14, PAD = 3;
+		private static final int FILL = 0xC8111820, FILL_HOVER = 0xE01A2430, BORDER = 0x40FFFFFF, GOLD = 0xFFFFC233, GOLD_DEEP = 0xFFFF8A1C,
+				INK = 0xFF2A1A06, KEY = 0x30FFFFFF, KEY_TEXT = 0xFFB8C0C8;
+		private static final String HINT = "R⇧";
+		private final Runnable open;
+		private float hover;
+		private long lastFrame;
+
+		HubButton(int x, int y, Runnable open) {
+			super(x, y, 0, HEIGHT, Text.literal(NAME));
+			this.open = open;
+			setWidth(naturalWidth());
+			setTooltip(Tooltip.of(Text.literal(TIP)));
+		}
+
+		/** Wide enough for the badge, the name and the key hint. */
+		public int naturalWidth() {
+			TextRenderer font = MinecraftClient.getInstance().textRenderer;
+			return PAD + BADGE + 6 + font.getWidth(label()) + 8 + font.getWidth(HINT) + 6 + 4;
+		}
+
+		private static Text label() {
+			return Text.literal(NAME).styled(s -> s.withBold(true));
+		}
+
+		@Override
+		protected void renderWidget(DrawContext context, int mouseX, int mouseY, float delta) {
+			long now = System.currentTimeMillis();
+			float step = lastFrame == 0 ? 1 : Math.min(1, (now - lastFrame) / 80f);
+			hover += ((isHovered() || isFocused() ? 1 : 0) - hover) * step;
+			lastFrame = now;
+			TextRenderer font = MinecraftClient.getInstance().textRenderer;
+			int x = getX(), y = getY(), w = getWidth(), h = getHeight();
+
+			// A soft shadow, the pill, a gold edge as you point at it, and a faint highlight along the top.
+			for (int i = 4; i >= 1; i--) round(context, x - i + 1, y - i + 3, w + 2 * i - 2, h + 2 * i - 2, 5 + i, (6 * (5 - i) / 10) << 24);
+			round(context, x, y, w, h, 5, mix(BORDER, GOLD, hover));
+			round(context, x + 1, y + 1, w - 2, h - 2, 4, mix(FILL, FILL_HOVER, hover));
+			context.fill(x + 4, y + 1, x + w - 4, y + 2, 0x18FFFFFF);
+
+			// The badge: gold, shading deeper, with four little switches (the top-left one lit).
+			int bx = x + PAD, by = y + (h - BADGE) / 2;
+			for (int row = 0; row < BADGE; row++) {
+				int inset = row == 0 || row == BADGE - 1 ? 2 : row == 1 || row == BADGE - 2 ? 1 : 0;
+				context.fill(bx + inset, by + row, bx + BADGE - inset, by + row + 1, mix(mix(GOLD, 0xFFFFE9A8, hover * 0.4f), GOLD_DEEP, (float) row / BADGE));
+			}
+			for (int i = 0; i < 4; i++) {
+				int sx = bx + 3 + (i % 2) * 5, sy = by + 3 + (i / 2) * 5;
+				round(context, sx, sy, 4, 3, 1, i == 0 ? 0xFFFFFBEA : INK);
+			}
+
+			int tx = bx + BADGE + 6, ty = y + (h - 8) / 2 + 1;
+			context.drawText(font, label(), tx, ty, mix(0xFFF2F4F6, 0xFFFFE08A, hover), false);
+
+			// Right Shift, on a little key at the right.
+			int kw = font.getWidth(HINT) + 6, kx = x + w - kw - 4, ky = y + 4;
+			round(context, kx, ky, kw, h - 8, 2, KEY);
+			context.fill(kx + 1, ky + h - 9, kx + kw - 1, ky + h - 8, 0x30000000);
+			context.drawText(font, HINT, kx + 3, ky + (h - 8 - 8) / 2 + 1, KEY_TEXT, false);
+		}
+
+		@Override
+		public void onClick(Click click, boolean doubled) {
+			open.run();
+		}
+
+		@Override
+		public boolean keyPressed(KeyInput input) {
+			if (!active || !visible || !isFocused()) return false;
+			int key = input.key();
+			if (key != GLFW.GLFW_KEY_ENTER && key != GLFW.GLFW_KEY_SPACE && key != GLFW.GLFW_KEY_KP_ENTER) return false;
+			playDownSound(MinecraftClient.getInstance().getSoundManager());
+			open.run();
+			return true;
+		}
+
+		@Override
+		protected void appendClickableNarrations(NarrationMessageBuilder builder) {
+			appendDefaultNarrations(builder);
+		}
+
+		private static void round(DrawContext context, int x, int y, int w, int h, int r, int color) {
+			if (w <= 0 || h <= 0) return;
+			r = Math.max(0, Math.min(r, Math.min(w, h) / 2));
+			for (int row = 0; row < r; row++) {
+				double d = r - row - 0.5;
+				int inset = (int) Math.round(r - Math.sqrt(Math.max(0, r * r - d * d)));
+				context.fill(x + inset, y + row, x + w - inset, y + row + 1, color);
+				context.fill(x + inset, y + h - row - 1, x + w - inset, y + h - row, color);
+			}
+			context.fill(x, y + r, x + w, y + h - r, color);
+		}
+
+		private static int mix(int a, int b, float t) {
+			t = Math.max(0, Math.min(1, t));
+			int alpha = Math.round((a >>> 24) * (1 - t) + (b >>> 24) * t);
+			int red = Math.round((a >> 16 & 0xFF) * (1 - t) + (b >> 16 & 0xFF) * t);
+			int green = Math.round((a >> 8 & 0xFF) * (1 - t) + (b >> 8 & 0xFF) * t);
+			int blue = Math.round((a & 0xFF) * (1 - t) + (b & 0xFF) * t);
+			return alpha << 24 | red << 16 | green << 8 | blue;
+		}
 	}
 }
