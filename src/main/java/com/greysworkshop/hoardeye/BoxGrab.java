@@ -96,13 +96,16 @@ public final class BoxGrab {
 	/** A fast player clicks about ten times a second, so one action is 100 ms. At the default 2x the bot does one a tick. */
 	private static final double HUMAN_ACTION_TICKS = 2;
 	private static final int MAX_TAKE_TRIES = 4;
-	private static final int OPEN_RETRY = 100, OPEN_TIMEOUT = 200, COLLECT_TIMEOUT = 200, REOPEN_TIMEOUT = 400;
+	/** Ticks to wait for a box to open before clicking again, on top of twice the ping. */
+	private static final int OPEN_RETRY_MIN = 12;
+	private static final int OPEN_TIMEOUT = 200, COLLECT_TIMEOUT = 200, REOPEN_TIMEOUT = 400;
 
 	private static Step step = Step.IDLE;
 	private static Request request;
 	private static int ticks, totalTicks, boxOutTick, hotbar, savedSelected, nextWant, spotIndex;
 	private static float savedYaw, savedPitch;
 	private static BlockPos spot;
+	private static Placement placement;
 	private static List<BlockPos> triedSpots = new ArrayList<>();
 	private static Item boxItem;
 	private static Text boxName;
@@ -131,6 +134,8 @@ public final class BoxGrab {
 	/** Self-test: pretend the server lost the clicks for this many passes over the box. */
 	static int testLoseClicks;
 	static int lastTakeTries;
+	/** Self-test: pretend the server lost this many clicks to open the box; and how many clicks the last open took. */
+	static int testLoseOpens, lastOpenTries;
 	/** Self-test: pretend somebody just walked up. */
 	static boolean testGuardTrip;
 
@@ -165,7 +170,7 @@ public final class BoxGrab {
 	private static BlockHitResult openedFrom;
 	/** Where you stood when this began, within reach of the container: where to go back to. */
 	private static Vec3d standAt;
-	private static int reopenTries, reopenClickTick;
+	private static int reopenTries, reopenClickTick, openTries, openClickTick;
 	/** How the container was last clicked to reopen it, for the self-test. */
 	static double lastReopenDistance;
 	static BlockHitResult lastReopenAim;
@@ -253,56 +258,138 @@ public final class BoxGrab {
 	// ---- Where the box goes ----
 
 	/** Spots to set the box down, best first. Close to your feet so it comes straight back when it breaks. */
+	/** Where a box can go: the cell, and the click on a neighbouring block's face that puts it there (it then faces that way). */
+	record Placement(BlockPos cell, BlockHitResult click) {
+		Direction facing() {
+			return click.getSide();
+		}
+	}
+
+	/** Why the cells around you were turned down, last time they were checked: for the log and for saying why nothing fit. */
+	static String lastSpotReport = "", lastSpotReason = "";
+	/** Which way the last box set down faced (up on a floor, sideways against a wall, down under a ceiling). */
+	static Direction lastPlacedFacing;
+
+	/** The cells a box could be set down in, best first. */
 	static List<BlockPos> spots(ClientPlayerEntity p, ClientWorld world) {
-		record Scored(BlockPos pos, double score) {}
+		List<BlockPos> list = new ArrayList<>();
+		for (Placement pl : placements(p, world)) list.add(pl.cell());
+		return list;
+	}
+
+	/**
+	 * Every way to set the box down from where you stand, best first: on a floor, against a wall or under a ceiling.
+	 * Each one is checked the way the game itself will check it: the cell is empty and nobody is in it, the face clicked
+	 * can really be seen and reached from your eyes, and the lid has room to open in the direction the box will face.
+	 */
+	static List<Placement> placements(ClientPlayerEntity p, ClientWorld world) {
+		record Scored(Placement placement, double score) {}
 		List<Scored> found = new ArrayList<>();
+		Map<String, Integer> why = new LinkedHashMap<>();
 		BlockPos feet = p.getBlockPos();
-		for (int dy = -1; dy <= 1; dy++) {
+		int cells = 0;
+		for (int dy = -1; dy <= 2; dy++) {
 			for (int dx = -2; dx <= 2; dx++) {
 				for (int dz = -2; dz <= 2; dz++) {
 					BlockPos cell = feet.add(dx, dy, dz);
-					if (!canHoldBox(p, world, cell)) continue;
-					double flat = Math.hypot(cell.getX() + 0.5 - p.getX(), cell.getZ() + 0.5 - p.getZ());
-					found.add(new Scored(cell, flat + Math.abs(dy) * 0.75));
+					cells++;
+					String no = cellProblem(p, world, cell);
+					if (no != null) {
+						why.merge(no, 1, Integer::sum);
+						continue;
+					}
+					// Floor first (as a person would), then walls, then the ceiling.
+					String best = null;
+					for (Direction facing : new Direction[] {Direction.UP, Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST, Direction.DOWN}) {
+						BlockHitResult click = clickFor(p, world, cell, facing);
+						if (click == null) {
+							best = best == null ? "nothing in view to set it against" : best;
+							continue;
+						}
+						if (!lidCanOpen(world, cell, facing)) {
+							best = "no room for the lid to open";
+							continue;
+						}
+						double flat = Math.hypot(cell.getX() + 0.5 - p.getX(), cell.getZ() + 0.5 - p.getZ());
+						double prefer = facing == Direction.UP ? 0 : facing == Direction.DOWN ? 1.5 : 1;
+						found.add(new Scored(new Placement(cell, click), flat + Math.abs(dy) * 0.75 + prefer));
+						best = "";
+					}
+					if (best != null && !best.isEmpty()) why.merge(best, 1, Integer::sum);
 				}
 			}
 		}
 		found.sort(Comparator.comparingDouble(Scored::score));
-		List<BlockPos> list = new ArrayList<>();
-		for (Scored s : found) list.add(s.pos());
+		List<Placement> list = new ArrayList<>();
+		Set<BlockPos> seen = new HashSet<>();
+		for (Scored s : found) if (seen.add(s.placement().cell())) list.add(s.placement());
+		StringBuilder report = new StringBuilder(cells + " cells checked, " + list.size() + " usable");
+		for (var e : why.entrySet()) report.append("; ").append(e.getValue()).append(' ').append(e.getKey());
+		lastSpotReport = report.toString();
+		// The reason that matters most: what stopped the cells that were empty. If none were, it's all solid.
+		lastSpotReason = why.entrySet().stream().filter(e -> !e.getKey().equals("not empty")).max(Map.Entry.comparingByValue())
+				.map(Map.Entry::getKey).orElse("every cell around you is solid");
 		return list;
 	}
 
-	/** The middle of the floor block's top, where a person would click to set a box on it: half way down on a bottom slab. */
-	private static Vec3d floorHit(ClientWorld world, BlockPos below) {
-		var shape = world.getBlockState(below).getOutlineShape(world, below);
-		double top = shape.isEmpty() ? 1 : Math.min(1, shape.getMax(Direction.Axis.Y));
-		return new Vec3d(below.getX() + 0.5, below.getY() + top, below.getZ() + 0.5);
+	/** Why a box can't go in this cell at all, whichever way it faced; null if it can. */
+	private static String cellProblem(ClientPlayerEntity p, ClientWorld world, BlockPos cell) {
+		if (!world.getBlockState(cell).isAir()) return "not empty";
+		if (!world.getWorldBorder().contains(cell)) return "past the world border";
+		if (!world.doesNotIntersectEntities(null, VoxelShapes.fullCube().offset(cell.getX(), cell.getY(), cell.getZ()))) return "someone or something standing in it";
+		if (p.getEyePos().distanceTo(Vec3d.ofCenter(cell)) > REACH + 0.9) return "out of reach";
+		// The drop must not land where it would burn or wash away.
+		for (Direction d : Direction.values()) {
+			BlockState side = world.getBlockState(cell.offset(d));
+			if (!side.getFluidState().isEmpty() || side.isIn(BlockTags.FIRE) || side.isOf(Blocks.CACTUS)) return "next to water, lava or fire";
+		}
+		return null;
 	}
 
-	private static boolean canHoldBox(ClientPlayerEntity p, ClientWorld world, BlockPos cell) {
-		BlockState here = world.getBlockState(cell), above = world.getBlockState(cell.up());
-		// It opens upward, so the cell above must be clear too.
-		if (!here.isAir() || !above.getCollisionShape(world, cell.up()).isEmpty() || !above.getFluidState().isEmpty()) return false;
-		if (!world.getWorldBorder().contains(cell)) return false;
-		BlockPos below = cell.down();
-		BlockState floor = world.getBlockState(below);
-		// Anything with a top to click: a slab, a path, farmland or a full block. Not something placing would replace instead.
-		if (floor.isReplaceable() || floor.getOutlineShape(world, below).isEmpty() || floor.getCollisionShape(world, below).isEmpty()) return false;
+	/** The game's own test for whether a box facing this way can open: the half block its lid swings into is free. */
+	static boolean lidCanOpen(ClientWorld world, BlockPos cell, Direction facing) {
+		Box lid = net.minecraft.entity.mob.ShulkerEntity.calculateBoundingBox(1f, facing, 0f, 0.5f, cell.toBottomCenterPos()).contract(1.0E-6);
+		return world.isSpaceEmpty(lid);
+	}
+
+	/**
+	 * A click that puts a box facing {@code facing} into {@code cell}: on the face of the block behind it, at a point that
+	 * can really be seen and reached from your eyes. Null if there's no such point, or that block can't be clicked on.
+	 */
+	private static BlockHitResult clickFor(ClientPlayerEntity p, ClientWorld world, BlockPos cell, Direction facing) {
+		BlockPos support = cell.offset(facing.getOpposite());
+		BlockState block = world.getBlockState(support);
+		var shape = block.getOutlineShape(world, support);
+		// Anything with a face to click: a slab, a path, farmland or a full block. Not something placing would replace instead.
+		if (block.isReplaceable() || shape.isEmpty() || block.getCollisionShape(world, support).isEmpty()) return null;
 		// Clicking these would use them instead of placing against them; on a chest it'd also block the lid.
-		if (floor.hasBlockEntity() || floor.createScreenHandlerFactory(world, below) != null || floor.isIn(BlockTags.TRAPDOORS)
-				|| floor.isIn(BlockTags.DOORS) || floor.isIn(BlockTags.BUTTONS) || floor.isOf(Blocks.NOTE_BLOCK) || floor.isOf(Blocks.TNT)) return false;
-		if (!world.doesNotIntersectEntities(null, VoxelShapes.fullCube().offset(cell.getX(), cell.getY(), cell.getZ()))) return false;
-		// The drop must not land where it would burn or wash away.
-		for (Direction d : Direction.Type.HORIZONTAL) {
-			BlockState side = world.getBlockState(cell.offset(d));
-			FluidState fluid = side.getFluidState();
-			if (fluid.isIn(FluidTags.LAVA) || !fluid.isEmpty() || side.isIn(BlockTags.FIRE) || side.isOf(Blocks.CACTUS)) return false;
+		if (block.hasBlockEntity() || block.createScreenHandlerFactory(world, support) != null || block.isIn(BlockTags.TRAPDOORS)
+				|| block.isIn(BlockTags.DOORS) || block.isIn(BlockTags.BUTTONS) || block.isOf(Blocks.NOTE_BLOCK) || block.isOf(Blocks.TNT)) return null;
+		Box b = shape.getBoundingBox().offset(support);
+		Direction.Axis axis = facing.getAxis();
+		// The face itself: its middle first, then points well inside its edges.
+		double faceAt = facing.getDirection() == Direction.AxisDirection.POSITIVE ? b.getMax(axis) : b.getMin(axis);
+		Vec3d eye = p.getEyePos();
+		double[][] offsets = {{0, 0}, {0.3, 0.3}, {-0.3, 0.3}, {0.3, -0.3}, {-0.3, -0.3}, {0.3, 0}, {-0.3, 0}, {0, 0.3}, {0, -0.3}};
+		Direction.Axis[] others = java.util.Arrays.stream(Direction.Axis.values()).filter(a -> a != axis).toArray(Direction.Axis[]::new);
+		for (double[] o : offsets) {
+			double[] xyz = new double[3];
+			xyz[axis.ordinal()] = faceAt;
+			for (int k = 0; k < 2; k++) {
+				Direction.Axis a = others[k];
+				double mid = (b.getMin(a) + b.getMax(a)) / 2, half = (b.getMax(a) - b.getMin(a)) / 2;
+				xyz[a.ordinal()] = mid + o[k] * 2 * half * 0.8;
+			}
+			Vec3d point = new Vec3d(xyz[0], xyz[1], xyz[2]);
+			if (eye.distanceTo(point) > REACH) continue;
+			// What you'd really hit looking there: it has to be this block, on this face.
+			Vec3d end = eye.add(point.subtract(eye).multiply(1.05));
+			BlockHitResult ray = world.raycast(new RaycastContext(eye, end, RaycastContext.ShapeType.OUTLINE, RaycastContext.FluidHandling.NONE, p));
+			if (ray.getType() == HitResult.Type.BLOCK && ray.getBlockPos().equals(support) && ray.getSide() == facing) {
+				return new BlockHitResult(ray.getPos(), facing, support, false);
+			}
 		}
-		Vec3d hit = floorHit(world, below), eye = p.getEyePos();
-		if (eye.distanceTo(hit) > REACH) return false;
-		BlockHitResult ray = world.raycast(new RaycastContext(eye, hit.add(0, -0.01, 0), RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, p));
-		return ray.getType() == HitResult.Type.MISS || ray.getBlockPos().equals(below);
+		return null;
 	}
 
 	/** Whether the picked items and the box itself all fit in the inventory. */
@@ -689,6 +776,7 @@ public final class BoxGrab {
 		savedSelected = inv.getSelectedSlot();
 		standAt = p.getEntityPos();
 		reopenTries = 0;
+		openTries = 0;
 		reopenAim = null;
 		boxItem = r.box().getItem();
 		boxName = r.box().get(DataComponentTypes.CUSTOM_NAME);
@@ -763,17 +851,18 @@ public final class BoxGrab {
 	/** Everything up to the break, right now. False if there's nowhere to put the box, which the normal way reports. */
 	private static boolean burst(MinecraftClient client, ClientPlayerEntity p, int previousSync) {
 		PlayerInventory inv = p.getInventory();
-		List<BlockPos> options = spots(p, client.world);
-		if (options.isEmpty() || !inv.getStack(hotbar).isOf(boxItem)) return false;
+		List<Placement> all = placements(p, client.world);
+		// All in one go only on a floor: the open click is worked out before the box is there to be seen.
+		if (all.isEmpty() || all.get(0).facing() != Direction.UP || !inv.getStack(hotbar).isOf(boxItem)) return false;
+		List<BlockPos> options = List.of(all.get(0).cell());
 		burstRun = true;
 		// Running from here on, so these clicks aren't mistaken for you opening a container.
 		go(Step.PLACE);
 		spot = options.get(0);
 		triedSpots.add(spot);
-		BlockPos below = spot.down();
-		Vec3d floor = floorHit(client.world, below);
-		look(p, floor);
-		client.interactionManager.interactBlock(p, Hand.MAIN_HAND, new BlockHitResult(floor, Direction.UP, below, false));
+		BlockHitResult floorClick = all.get(0).click();
+		look(p, floorClick.getPos());
+		client.interactionManager.interactBlock(p, Hand.MAIN_HAND, floorClick);
 		p.swingHand(Hand.MAIN_HAND);
 		boxOutTick = totalTicks;
 		Vec3d top = Vec3d.ofCenter(spot).add(0, 0.5, 0);
@@ -918,24 +1007,26 @@ public final class BoxGrab {
 			}
 			return;
 		}
-		List<BlockPos> options = spots(p, world);
-		options.removeAll(triedSpots);
+		List<Placement> options = new ArrayList<>(placements(p, world));
+		options.removeIf(o -> triedSpots.contains(o.cell()));
 		if (options.isEmpty() || triedSpots.size() >= 4) {
-			notes.add(Text.translatable("hoardeye.grab.no_spot").getString());
+			HoardEyeClient.LOGGER.info("Box picker: nowhere to set the box down ({} tried): {}", triedSpots.size(), lastSpotReport);
+			notes.add(Text.translatable("hoardeye.grab.no_spot").getString() + " (" + lastSpotReason + ")");
 			go(Step.REOPEN);
 			return;
 		}
-		spot = options.get(0);
+		placement = options.get(0);
+		spot = placement.cell();
+		lastPlacedFacing = placement.facing();
 		triedSpots.add(spot);
+		HoardEyeClient.LOGGER.info("Box picker: setting the box down at {} facing {} ({})", spot.toShortString(), placement.facing().asString(), lastSpotReport);
 		if (testFailPlaces > 0) {
 			testFailPlaces--;
 			return;
 		}
 		inv.setSelectedSlot(hotbar);
-		BlockPos below = spot.down();
-		Vec3d hit = floorHit(world, below);
-		look(p, hit);
-		client.interactionManager.interactBlock(p, Hand.MAIN_HAND, new BlockHitResult(hit, Direction.UP, below, false));
+		look(p, placement.click().getPos());
+		client.interactionManager.interactBlock(p, Hand.MAIN_HAND, placement.click());
 		p.swingHand(Hand.MAIN_HAND);
 		if (boxOutTick < 0) boxOutTick = totalTicks;
 		acted();
@@ -964,17 +1055,29 @@ public final class BoxGrab {
 			go(Step.BREAK);
 			return;
 		}
-		if ((!clicked && ready()) || (clicked && ticks % OPEN_RETRY == 0)) {
+		// Once, then again as soon as an answer is overdue, not seconds later: a lost click used to leave the box
+		// standing there for 5s, and a second lost one gave up and broke it with nothing taken out.
+		if ((!clicked && ready()) || (clicked && ticks - openClickTick >= OPEN_RETRY_MIN + 2 * latencyTicks(client, p))) {
 			clicked = true;
-			Vec3d hit = Vec3d.ofCenter(spot).add(0, 0.5, 0);
-			if (p.getEyePos().distanceTo(hit) > REACH + 1) {
+			openClickTick = ticks;
+			// Somewhere on the box that can really be seen from here, a different part each try.
+			BlockHitResult aim = aimAt(p, world, spot, openTries++);
+			if (p.getEyePos().distanceTo(aim.getPos()) > REACH + 1) {
 				stop(client);
 				report(client, false, Text.translatable("hoardeye.grab.left_box", spot.toShortString()).getString());
 				return;
 			}
 			acted();
-			look(p, hit);
-			client.interactionManager.interactBlock(p, Hand.MAIN_HAND, new BlockHitResult(hit, Direction.UP, spot, false));
+			look(p, aim.getPos());
+			// Opening does nothing while the game thinks a block is still being broken.
+			if (client.interactionManager.isBreakingBlock()) client.interactionManager.cancelBlockBreaking();
+			if (openTries > 1) HoardEyeClient.LOGGER.info("Box picker: opening the box again, try {}, step tick {}", openTries, ticks);
+			lastOpenTries = openTries;
+			if (testLoseOpens > 0) {
+				testLoseOpens--;
+				return;
+			}
+			client.interactionManager.interactBlock(p, Hand.MAIN_HAND, aim);
 			p.swingHand(Hand.MAIN_HAND);
 		}
 	}
@@ -1543,8 +1646,15 @@ public final class BoxGrab {
 			report(client, false, Text.translatable("hoardeye.grab.full_no_break", spot.toShortString()).getString());
 			return;
 		}
+		// The face you'd really be hitting from here, not just the one pointing your way: in a tight spot that can be hidden.
 		Direction side = Direction.getFacing(p.getEyePos().subtract(center));
-		if (!burstRun || !attacked) look(p, center.add(Vec3d.of(side.getVector()).multiply(0.5)));
+		Vec3d aimPoint = center.add(Vec3d.of(side.getVector()).multiply(0.5));
+		BlockHitResult seen = aimAt(p, world, spot, 0);
+		if (seen.getBlockPos().equals(spot) && seen.getType() == HitResult.Type.BLOCK) {
+			side = seen.getSide();
+			aimPoint = seen.getPos();
+		}
+		if (!burstRun || !attacked) look(p, aimPoint);
 		if (!attacked) {
 			if (!ready()) return;
 			holdBestTool(client, p);
@@ -2027,6 +2137,8 @@ public final class BoxGrab {
 		MinecraftClient client = MinecraftClient.getInstance();
 		TextRenderer font = client.textRenderer;
 		String text = Text.translatable("hoardeye.grab.step." + step.name().toLowerCase(java.util.Locale.ROOT)).getString();
+		// Mining it by hand is the game's own 3s, not the bot stuck: say so while it happens.
+		if (step == Step.BREAK && client.player != null && breakTicks(client.player.getInventory()) > 20) text = Text.translatable("hoardeye.grab.step.break_hand").getString();
 		if (runTotal > 1) text = runNumber + "/" + runTotal + "  " + text;
 		String stop = stopRequested ? Text.translatable("hoardeye.grab.stopping").getString() : Text.translatable("hoardeye.grab.stop_hint").getString();
 		int width = Math.max(font.getWidth(text), font.getWidth(stop)) + 12, x = (context.getScaledWindowWidth() - width) / 2, y = 8;

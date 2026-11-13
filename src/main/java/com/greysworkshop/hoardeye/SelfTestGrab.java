@@ -825,6 +825,47 @@ public final class SelfTestGrab {
 		});
 		checkWorldClean("F2");
 
+		// TIGHT1: shut in a 1x1 shaft. Nowhere on a floor or a wall: the box goes under the ceiling, opening down past your head.
+		// TIGHT2: in a 1x2 pocket with one gap at head height and a block over it: it goes against the far side of the gap.
+		for (int which = 1; which <= 2; which++) {
+			final int w = which;
+			String t = "TIGHT" + w;
+			reset();
+			boxInChest(5);
+			then(t + " build", () -> {
+				int x = origin.getX(), y = origin.getY(), z = origin.getZ();
+				cmd("fill " + (x - 2) + " " + y + " " + (z - 1) + " " + (x + 1) + " " + (y + 2) + " " + (z + 1) + " glass");
+				cmd("fill " + x + " " + y + " " + z + " " + x + " " + (y + (w == 1 ? 2 : 1)) + " " + z + " air");
+				if (w == 1) cmd("fill " + (x - 1) + " " + (y + 3) + " " + (z - 1) + " " + (x + 1) + " " + (y + 3) + " " + (z + 1) + " glass");
+				else cmd("setblock " + (x - 1) + " " + (y + 1) + " " + z + " air");
+				cmd("setblock " + chest.getX() + " " + chest.getY() + " " + chest.getZ() + " air");
+				chest = origin.add(1, 0, 0);
+				cmd("setblock " + chest.getX() + " " + chest.getY() + " " + chest.getZ() + " chest");
+				cmd("item replace block " + chest.getX() + " " + chest.getY() + " " + chest.getZ() + " container.5 with " + KIT);
+				cmd("item replace entity @s hotbar.0 with netherite_pickaxe[enchantments={efficiency:5}]");
+			});
+			pause(15);
+			openChest();
+			then(t + " spots", () -> {
+				var all = BoxGrab.placements(mc.player, mc.world);
+				log(t + " spots: " + BoxGrab.lastSpotReport);
+				Direction want = w == 1 ? Direction.DOWN : Direction.EAST;
+				check(t + ": it sees the one way in (" + (all.isEmpty() ? "none" : all.get(0).cell().toShortString() + " facing " + all.get(0).facing()) + ")",
+						!all.isEmpty() && all.get(0).facing() == want);
+			});
+			openPickerOn(5);
+			clickCell(0, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+			pause(1);
+			pressEnterAndWait();
+			then(t + " results", () -> {
+				check(t + ": worked: " + BoxGrab.lastMessage, BoxGrab.lastOk && count(Items.TOTEM_OF_UNDYING) == 1);
+				check(t + ": set down facing " + BoxGrab.lastPlacedFacing, BoxGrab.lastPlacedFacing == (w == 1 ? Direction.DOWN : Direction.EAST));
+				check(t + ": box back in the chest", mc.player.currentScreenHandler.slots.get(5).getStack().isOf(Items.RED_SHULKER_BOX));
+			});
+			checkWorldClean(t);
+			then(t + " chest back", () -> chest = origin.add(2, 0, 0));
+		}
+
 		// G: the box is taken from the chest while the picker is open.
 		reset();
 		boxInChest(5);
@@ -1041,6 +1082,28 @@ public final class SelfTestGrab {
 			check("P: box back without them", contentsOf(mc.player.currentScreenHandler.slots.get(5).getStack()).get(10).isEmpty());
 		});
 		checkWorldClean("P");
+
+		// P2: the clicks to open the box get lost: it clicks again straight away, not seconds later, and still takes them.
+		reset();
+		boxInChest(5);
+		then("P2 hand", () -> {
+			cmd("item replace entity @s hotbar.0 with netherite_pickaxe[enchantments={efficiency:5}]");
+			BoxGrab.testLoseOpens = 2;
+		});
+		pause(5);
+		openChest();
+		openPickerOn(5);
+		clickCell(10, GLFW.GLFW_MOUSE_BUTTON_LEFT, 0);
+		pause(1);
+		pressEnterAndWait();
+		then("P2", () -> {
+			BoxGrab.testLoseOpens = 0;
+			check("P2: opened on the third click (" + BoxGrab.lastOpenTries + "): " + BoxGrab.lastMessage, BoxGrab.lastOk && BoxGrab.lastOpenTries == 3);
+			check("P2: got all the apples even so", count(Items.GOLDEN_APPLE) == 64);
+			check("P2: two lost clicks cost under 2s, not 5s each (" + BoxGrab.lastTicks + " ticks)", BoxGrab.lastTicks < 100);
+			check("P2: box back without them", contentsOf(mc.player.currentScreenHandler.slots.get(5).getStack()).get(10).isEmpty());
+		});
+		checkWorldClean("P2");
 
 		// Q: several boxes in one go. Tabs, a plan across them, each one back where it was.
 		reset();
