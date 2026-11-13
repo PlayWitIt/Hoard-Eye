@@ -720,7 +720,7 @@ public final class BoxPicker {
 		}
 		if (!p.currentScreenHandler.getCursorStack().isEmpty()) return Text.translatable("hoardeye.picker.cursor");
 		if (!cursor.isEmpty()) return Text.translatable("hoardeye.picker.holding");
-		if (anyBox && !hasSpot) return Text.translatable("hoardeye.picker.no_spot");
+		if (anyBox && !hasSpot) return Text.translatable("hoardeye.picker.no_spot").append(" (" + BoxGrab.lastSpotReason + ")");
 		String sim = BoxGrab.simulate(p.getInventory(), plan);
 		if (sim != null) return Text.translatable(sim);
 		if (anyBox && ModConfig.INSTANCE.boxPickerGuard) {

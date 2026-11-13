@@ -214,6 +214,7 @@
 	"hoardeye.grab.step.take": "Taking your items…",
 	"hoardeye.grab.step.check": "Making sure they arrived…",
 	"hoardeye.grab.step.break": "Breaking the box…",
+	"hoardeye.grab.step.break_hand": "Breaking the box by hand (3s, carry a pickaxe to make it quick)…",
 	"hoardeye.grab.step.collect": "Picking the box up…",
 	"hoardeye.grab.step.reopen": "Going back to the chest…",
 	"hoardeye.grab.step.put_back": "Putting the box back…",
